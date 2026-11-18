@@ -688,7 +688,15 @@ class StreamingService : LifecycleService() {
                 onRecordStop = { stopRecording() },
                 onRecordStatus = { getRecordingStatus() },
                 // /control/stop must also drop RTSP viewers, which the HTTP server does not own.
-                onStreamingEnabledChanged = { enabled -> if (!enabled) rtspServer?.disconnectAll() }
+                onStreamingEnabledChanged = { enabled -> if (!enabled) rtspServer?.disconnectAll() },
+                sourceFrameSize = {
+                    backend?.takeIf { it.ready && it.width > 0 && it.height > 0 }
+                        ?.let { it.width to it.height }
+                },
+                gpuFrameSize = {
+                    (cameraXGlPipe ?: glPipe)?.takeIf { it.frameWidth > 0 && it.frameHeight > 0 }
+                        ?.let { it.frameWidth to it.frameHeight }
+                }
             )
             // Initialize encoders with the streaming server helper
             h264StreamingEncoder = H264StreamingEncoder(this, streamingServerHelper!!) { Log.i(TAG, "H264: $it"); onLog?.invoke(it) }
@@ -1326,7 +1334,7 @@ class StreamingService : LifecycleService() {
                 }
                 startCamera1Backend(want, demand)
             } else {
-                val source = if (surfaceEncoder) sourceCaptureSize(want) else want
+                val source = if (surfaceEncoder || !demand.h264) sourceCaptureSize(want) else want
                 startCameraXBackend(source, demand, surfaceEncoder)
                 // CameraX can bind without the session ever configuring (e.g. "Unable to configure
                 // camera ... TimeoutException") — no analysis frames ever arrive. Detect that and fall
@@ -1542,7 +1550,12 @@ class StreamingService : LifecycleService() {
                 // Motion detection reads the luma plane without disturbing the encoders' buffers.
                 motionMonitor?.processFrame(img)
                 cameraXGlPipe?.let { pipe ->
-                    pipe.frameWidth = img.width; pipe.frameHeight = img.height
+                    // The Preview.SurfaceRequest's negotiated size is the GPU input size.
+                    // Do not overwrite it with ImageAnalysis dimensions; they can differ.
+                    if (pipe.frameWidth <= 0 || pipe.frameHeight <= 0) {
+                        pipe.frameWidth = img.width
+                        pipe.frameHeight = img.height
+                    }
                 }
                 val recording = localRecorder?.isRecording == true || recordingNeeded
                 val activeEncoders = encoders.filter { it.hasClients() }
