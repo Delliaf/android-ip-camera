@@ -601,10 +601,25 @@
             <label for="resolutionSelect">Resolution <span class='val-badge' id='resolutionVal'>&mdash;</span></label>
             <select id="resolutionSelect" style="margin-bottom: 20px" onchange='setResolution(this.value)'></select>
 
-            <label for="exposure">Exposure <span class='val-badge' id='exposureVal'>0</span></label>
+            <label for="exposure">Auto exposure compensation <span class='val-badge' id='exposureVal'>0</span></label>
             <input id="exposure" type='range' min='-10' max='10' step='1' value='0' data-control='exposure'
               data-badge='exposureVal'>
 
+            <div class="manual-camera-panel" style="margin:14px 0 20px; padding:12px; border:1px solid var(--border, #666); border-radius:8px;">
+              <label for="exposureMode">Sensor exposure</label>
+              <select id="exposureMode" data-control="exposure_mode">
+                <option value="auto">Auto (AE)</option>
+                <option value="manual">Manual ISO + shutter</option>
+              </select>
+              <div id="manualExposureControls" hidden>
+                <label for="manualIso">ISO</label>
+                <input type="number" id="manualIso" min="25" max="3200" step="1" value="400" data-control="manual_iso">
+                <label for="manualShutterUs">Shutter time (µs)</label>
+                <input type="number" id="manualShutterUs" min="100" max="1000000" step="100" value="20000" data-control="manual_shutter_us">
+                <small>10000 µs = 1/100 s · 20000 µs = 1/50 s. Long exposures reduce FPS.</small>
+              </div>
+              <small id="manualExposureStatus" aria-live="polite"></small>
+            </div>
             <label for="focusDistance">Focus <span class='val-badge' id='focusVal'>Auto</span></label>
             <input id="focusDistance" type='range' min='-0.05' max='1.0' step='0.05' value='-1'
               data-control='focus_distance' data-badge='focusVal' data-fmt='focus'>
@@ -1034,6 +1049,35 @@
       return val;
     }
 
+    // Hide unsupported Camera2 manual-sensor options rather than sending settings
+    // that a legacy Camera1 backend cannot use. The camera API selector still matters.
+    function updateManualExposureUi() {
+      const cam = selectedCameraInfo();
+      const caps = cam?.manualExposure;
+      const supported = caps?.supported === true;
+      const mode = getElById('exposureMode');
+      const panel = getElById('manualExposureControls');
+      const notice = getElById('manualExposureStatus');
+      const iso = getElById('manualIso');
+      const shutter = getElById('manualShutterUs');
+      if (!mode || !panel) return;
+      mode.disabled = !supported;
+      panel.hidden = !supported || mode.value !== 'manual';
+      if (supported) {
+        if (iso) {
+          iso.min = String(caps.isoMin || 25);
+          iso.max = String(caps.isoMax || 3200);
+        }
+        if (shutter) {
+          shutter.min = String(caps.shutterMinUs || 1);
+          shutter.max = String(caps.shutterMaxUs || 1000000);
+        }
+      }
+      if (notice) notice.textContent = supported
+        ? 'Camera2 MANUAL_SENSOR available. Select CameraX if using the legacy Camera1 capture backend.'
+        : 'Manual ISO/shutter unavailable on this camera (Camera2 MANUAL_SENSOR not advertised).';
+    }
+
     // Keep the client-side `cameraList` in sync with recently-sent control values.
     function updateLocalLensSetting(param, val) {
       const key = toLensKey(param);
@@ -1044,6 +1088,7 @@
       cam.lensSettings[key] = normalizeValueForKey(key, val);
       // Reflect the change in the visible controls without re-sending to server
       try { applyStreamSettings(cam.lensSettings); } catch (_) { }
+      if (param === 'exposure_mode') updateManualExposureUi();
     }
 
     function formatControlValue(el) {
@@ -2008,6 +2053,7 @@
             } catch (_) { }
           }
           updateStatusOverlay(data);
+          updateManualExposureUi();
           getElById('appVersion').innerText = `v${data.appVersion}`;
         })
         .catch(err => {
