@@ -55,6 +55,16 @@ class MjpegStreamingEncoder(
         return null
     }
 
+    private fun roiFor(prefs: android.content.SharedPreferences, camId: String?, w: Int, h: Int): android.graphics.Rect {
+        val phys = camId?.substringAfter(':', camId)
+        fun read(prefix: String, default: Float): Float {
+            val v = (camId?.let { prefs.getString(prefix + it, null) }
+                ?: phys?.let { prefs.getString(prefix + it, null) })?.toFloatOrNull()
+            return v ?: default
+        }
+        return nv21RoiRect(w, h, read("roi_zoom_", 1f), read("roi_x_", .5f), read("roi_y_", .5f))
+    }
+
     private var lastFrameTime = 0L
     private var captureRunning = false
 
@@ -101,7 +111,7 @@ class MjpegStreamingEncoder(
                 }
             }
             val quality = DeviceMemoryHelper.mjpegJpegQuality(context)
-            var jpegBytes = convertNV21toJPEG(nv21, image.width, image.height, quality)
+            var jpegBytes = convertNV21toJPEG(nv21, image.width, image.height, quality, roiFor(prefs, camId, image.width, image.height))
             val needsTransform = totalRotation != 0 || scaleFactor != 1.0f || contrastValue != 0 || mirror
             if (needsTransform) {
                 jpegBytes = applyTransformations(jpegBytes, totalRotation, scaleFactor, contrastValue, quality, mirror)
@@ -150,7 +160,7 @@ class MjpegStreamingEncoder(
             } else false
 
             val quality = DeviceMemoryHelper.mjpegJpegQuality(context)
-            var jpegBytes = convertNV21toJPEG(nv21, width, height, quality)
+            var jpegBytes = convertNV21toJPEG(nv21, width, height, quality, roiFor(prefs, camId, width, height))
             val needsTransform = totalRotation != 0 || scaleFactor != 1.0f || contrastValue != 0 || mirror
             if (needsTransform) {
                 jpegBytes = applyTransformations(jpegBytes, totalRotation, scaleFactor, contrastValue, quality, mirror)
