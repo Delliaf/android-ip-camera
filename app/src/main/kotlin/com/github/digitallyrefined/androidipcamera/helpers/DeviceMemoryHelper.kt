@@ -49,10 +49,14 @@ object DeviceMemoryHelper {
     fun maxSnapshotBytes(context: Context): Int =
         if (isLowRamDevice(context) || isUnderMemoryPressure()) 512 * 1024 else 2 * 1024 * 1024
 
-    fun mjpegJpegQuality(context: Context): Int =
-        when {
-            isSevereMemoryPressure() -> 60
-            isLowRamDevice(context) || isUnderMemoryPressure() -> 70
-            else -> 80
+    fun mjpegJpegQuality(context: Context): Int {
+        val configured = androidx.preference.PreferenceManager.getDefaultSharedPreferences(context)
+            .getString("mjpeg_quality", "auto")?.toIntOrNull()?.coerceIn(30, 100) ?: 80
+        // Avoid OOM during active memory pressure even when the user requested 100%.
+        return when {
+            isSevereMemoryPressure() -> minOf(configured, 60)
+            isLowRamDevice(context) || isUnderMemoryPressure() -> minOf(configured, 70)
+            else -> configured
         }
+    }
 }
