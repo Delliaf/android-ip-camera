@@ -1703,6 +1703,18 @@ class StreamingService : LifecycleService() {
             else -> null
         }
         focus?.toFloatOrNull()?.let { b.setManualFocus(it) }
+        // Restore manual sensor settings after opening the camera; nulls restore AE.
+        val mode = p.getString("manual_exposure_mode_$id",
+            p.getString("manual_exposure_mode_$phys", "auto"))
+        if (mode == "manual") {
+            val iso = p.getString("manual_iso_$id",
+                p.getString("manual_iso_$phys", "400"))?.toIntOrNull() ?: 400
+            val shutter = p.getString("manual_shutter_us_$id",
+                p.getString("manual_shutter_us_$phys", "20000"))?.toLongOrNull() ?: 20000L
+            b.setManualExposure(iso, shutter)
+        } else {
+            b.setManualExposure(null, null)
+        }
     }
 
     /** Rear camera id that owns the flash unit (usually the main lens). Auxiliary rear lenses on
@@ -2106,6 +2118,31 @@ class StreamingService : LifecycleService() {
                 prefs.edit().putString("exposure_$id", ev.toString()).apply()
                 if (physicalId.isNotBlank() && physicalId != id) prefs.edit().putString("exposure_$physicalId", ev.toString()).apply()
                 launchMain { backend?.setExposure(ev) }
+            }
+            "exposure_mode", "manual_iso", "manual_shutter_us" -> {
+                if (id == null) return
+                val normalized = when (key) {
+                    "exposure_mode" -> value.takeIf { it == "auto" || it == "manual" } ?: return
+                    "manual_iso" -> value.toIntOrNull()?.takeIf { it in 25..204800 }?.toString() ?: return
+                    else -> value.toLongOrNull()?.takeIf { it in 1L..1_000_000L }?.toString() ?: return
+                }
+                val prefix = when (key) {
+                    "exposure_mode" -> "manual_exposure_mode_"
+                    "manual_iso" -> "manual_iso_"
+                    else -> "manual_shutter_us_"
+                }
+                val edit = prefs.edit().putString(prefix + id, normalized)
+                if (physicalId.isNotBlank() && physicalId != id) edit.putString(prefix + physicalId, normalized)
+                edit.apply()
+                // One atomic snapshot of all three preferences; changing ISO never resets focus.
+                val mode = prefs.getString("manual_exposure_mode_$id", "auto")
+                val iso = prefs.getString("manual_iso_$id", "400")?.toIntOrNull() ?: 400
+                val shutter = prefs.getString("manual_shutter_us_$id", "20000")?.toLongOrNull() ?: 20000L
+                launchMain {
+                    backend?.setManualExposure(
+                        if (mode == "manual") iso else null,
+                        if (mode == "manual") shutter else null)
+                }
             }
             "zoom" -> {
                 val z = value.toFloatOrNull() ?: return
