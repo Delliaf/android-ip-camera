@@ -29,5 +29,10 @@ interface CaptureBackend {
      * continuous autofocus. Backends apply this on a best-effort basis.
      */
     fun setManualFocus(distance: Float)
+    /**
+     * Fixed ISO + sensor exposure (microseconds). Nulls restore auto exposure.
+     * Legacy Camera1 implementations do not support this; Camera2 will check MANUAL_SENSOR.
+     */
+    fun setManualExposure(iso: Int?, shutterUs: Long?) {}
     fun stop()
 }
