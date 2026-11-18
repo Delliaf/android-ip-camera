@@ -596,6 +596,29 @@
               <button id="modeMjpegBtn" class="btn btn-action" style="width: 49%;">MJPEG</button>
             </div>
 
+            <label for="streamBitrateKbps">Main H.264 / RTSP bitrate</label>
+            <select id="streamBitrateKbps" data-control="stream_bitrate_kbps">
+              <option value="auto">Auto (encoder dependent)</option>
+              <option value="2000">2 Mbps</option>
+              <option value="5000">5 Mbps</option>
+              <option value="10000">10 Mbps</option>
+              <option value="20000">20 Mbps</option>
+              <option value="40000">40 Mbps</option>
+              <option value="60000">60 Mbps</option>
+              <option value="80000">80 Mbps</option>
+            </select>
+            <small>The hardware encoder may clamp the bitrate to supported limits; changing this setting restarts an active encoder.</small>
+
+            <label for="mjpegQuality">Browser MJPEG JPEG quality</label>
+            <select id="mjpegQuality" data-control="mjpeg_quality">
+              <option value="auto">Auto (80%)</option>
+              <option value="85">85%</option>
+              <option value="90">90%</option>
+              <option value="95">95%</option>
+              <option value="100">100%</option>
+            </select>
+            <small>High quality requires more CPU and bandwidth. Memory pressure may temporarily lower quality.</small>
+
             <p class="group-title">Camera Control</p>
 
             <label for="resolutionSelect">Resolution <span class='val-badge' id='resolutionVal'>&mdash;</span></label>
