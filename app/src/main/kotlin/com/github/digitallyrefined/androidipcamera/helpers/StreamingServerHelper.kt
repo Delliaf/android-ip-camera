@@ -1327,6 +1327,9 @@ class StreamingServerHelper(
             val keys = listOf(
                 "zoom_$cameraId", "zoom_$physical",
                 "exposure_$cameraId", "exposure_$physical",
+                "manual_exposure_mode_$cameraId", "manual_exposure_mode_$physical",
+                "manual_iso_$cameraId", "manual_iso_$physical",
+                "manual_shutter_us_$cameraId", "manual_shutter_us_$physical",
                 "focus_$cameraId", "focus_$physical",
                 "camera_rotate_$cameraId", "camera_rotate_$physical",
                 "stream_scale_$cameraId", "stream_scale_$physical",
@@ -1350,6 +1353,9 @@ class StreamingServerHelper(
                     "resolution" to "auto",
                     "zoom" to String.format(Locale.US, "%.1f", minZoom),
                     "exposure" to "0",
+                    "exposure_mode" to "auto",
+                    "manual_iso" to "400",
+                    "manual_shutter_us" to "20000",
                     "focus_distance" to "-1",
                     "scale" to "1.0",
                     "contrast" to "0",
@@ -1461,7 +1467,12 @@ class StreamingServerHelper(
 
     private data class InfoSize(val w: Int, val h: Int)
 
-    private data class InfoCamera(val id: String, val facing: String, val label: String, val sizes: List<InfoSize>, val hasFlash: Boolean, val sensorOrientation: Int, val minZoom: Float?, val maxZoom: Float?)
+    private data class InfoCamera(
+        val id: String, val facing: String, val label: String, val sizes: List<InfoSize>,
+        val hasFlash: Boolean, val sensorOrientation: Int, val minZoom: Float?, val maxZoom: Float?,
+        val manualSensor: Boolean = false, val isoMin: Int = 25, val isoMax: Int = 3200,
+        val shutterMinUs: Long = 100, val shutterMaxUs: Long = 1_000_000
+    )
 
     private data class CameraInfoSource(
         val id: String,
@@ -1513,6 +1524,13 @@ class StreamingServerHelper(
                         put("label", camera.label)
                         put("hasFlash", camera.hasFlash)
                         put("sensorOrientation", camera.sensorOrientation)
+                        put("manualExposure", JSONObject().apply {
+                            put("supported", camera.manualSensor)
+                            put("isoMin", camera.isoMin)
+                            put("isoMax", camera.isoMax)
+                            put("shutterMinUs", camera.shutterMinUs)
+                            put("shutterMaxUs", camera.shutterMaxUs)
+                        })
                         try {
                             put("zoom", JSONObject().apply {
                                 try {
@@ -1660,6 +1678,9 @@ class StreamingServerHelper(
 
             // Exposure
             map["exposure"] = storedPrefString("0", "exposure_") ?: "0"
+            map["exposureMode"] = storedPrefString("auto", "manual_exposure_mode_") ?: "auto"
+            map["manualIso"] = storedPrefString("400", "manual_iso_") ?: "400"
+            map["manualShutterUs"] = storedPrefString("20000", "manual_shutter_us_") ?: "20000"
 
             // Focus distance
             map["focusDistance"] = storedPrefString("-1", "focus_") ?: "-1"
@@ -1922,7 +1943,19 @@ class StreamingServerHelper(
 
                     Pair(roundedMin, roundedMax)
                 } catch (_: Exception) { Pair(null, null) }
-                InfoCamera(source.id, source.facing, label, sizes, hasFlash, sensorOrientation, minZoom, maxZoom)
+                val availableCaps = ch.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES)
+                    ?: source.characteristics.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES)
+                val manualSensor = availableCaps?.contains(
+                    CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_MANUAL_SENSOR) == true
+                val isoRange = ch.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)
+                    ?: source.characteristics.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)
+                val shutterRange = ch.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)
+                    ?: source.characteristics.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)
+                InfoCamera(source.id, source.facing, label, sizes, hasFlash, sensorOrientation,
+                    minZoom, maxZoom, manualSensor,
+                    isoRange?.lower ?: 25, isoRange?.upper ?: 3200,
+                    shutterRange?.lower?.div(1000L)?.coerceAtLeast(1L) ?: 100L,
+                    shutterRange?.upper?.div(1000L)?.coerceAtMost(1_000_000L) ?: 1_000_000L)
             }
         } catch (_: Throwable) {
             emptyList()
