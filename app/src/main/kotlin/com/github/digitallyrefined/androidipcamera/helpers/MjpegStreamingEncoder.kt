@@ -111,7 +111,12 @@ class MjpegStreamingEncoder(
                 }
             }
             val quality = DeviceMemoryHelper.mjpegJpegQuality(context)
-            var jpegBytes = convertNV21toJPEG(nv21, image.width, image.height, quality, roiFor(prefs, camId, image.width, image.height))
+            // convertYUV420toNV21() respects ImageProxy.cropRect; use the same
+            // dimensions when constructing YuvImage, or some HALs reject the data.
+            val sourceW = image.cropRect.width()
+            val sourceH = image.cropRect.height()
+            var jpegBytes = convertNV21toJPEG(nv21, sourceW, sourceH, quality,
+                roiFor(prefs, camId, sourceW, sourceH))
             val needsTransform = totalRotation != 0 || scaleFactor != 1.0f || contrastValue != 0 || mirror
             if (needsTransform) {
                 jpegBytes = applyTransformations(jpegBytes, totalRotation, scaleFactor, contrastValue, quality, mirror)
