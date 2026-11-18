@@ -690,7 +690,13 @@ class StreamingService : LifecycleService() {
                 // /control/stop must also drop RTSP viewers, which the HTTP server does not own.
                 onStreamingEnabledChanged = { enabled -> if (!enabled) rtspServer?.disconnectAll() },
                 sourceFrameSize = {
-                    backend?.takeIf { it.ready && it.width > 0 && it.height > 0 }
+                    val active = backend
+                    val hasRealFrame = when (active) {
+                        is CameraXCapture -> active.hasProducedFrame
+                        null -> false
+                        else -> active.ready
+                    }
+                    active?.takeIf { hasRealFrame && it.width > 0 && it.height > 0 }
                         ?.let { it.width to it.height }
                 },
                 gpuFrameSize = {
