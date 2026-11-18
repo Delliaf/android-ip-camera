@@ -626,7 +626,8 @@
               <option value="2560x1440">Request 2560×1440 source</option>
               <option value="3840x2160">Request 3840×2160 (4K) source</option>
             </select>
-            <small>On CameraX with the H.264 GPU pipeline: keep stream output at 1920×1080, request 4K source, then crop. Actual source resolution depends on Camera2 and active use-case combination. Camera1 and MJPEG may not use the 4K source.</small>
+            <small>For the highest detail: output 1920×1080, request 4K source, then crop. Camera2 may negotiate a lower source size; Camera1 fallback is limited by its preview size. MJPEG uses the source ImageAnalysis frame when available.</small>
+            <small id="captureDiagnostics" aria-live="polite">Captured source: waiting for camera frames</small>
 
             <label for="roiZoom">Source ROI zoom <span class='val-badge' id='roiZoomVal'>1×</span></label>
             <input id="roiZoom" type="range" min="1" max="8" step="0.1" value="1"
@@ -2097,6 +2098,17 @@
           }
           updateStatusOverlay(data);
           updateManualExposureUi();
+          const cap = data.captureFrame || {};
+          const diag = getElById('captureDiagnostics');
+          if (diag) {
+            const analysis = cap.analysisWidth > 0
+              ? cap.analysisWidth + '×' + cap.analysisHeight : 'not active';
+            const gpu = cap.gpuInputWidth > 0
+              ? cap.gpuInputWidth + '×' + cap.gpuInputHeight : 'not active';
+            diag.textContent = 'Actual CameraX analysis: ' + analysis +
+              ' · H.264 GPU input: ' + gpu +
+              ' (these are negotiated sizes, not guaranteed sensor pixel detail)';
+          }
           getElById('appVersion').innerText = `v${data.appVersion}`;
         })
         .catch(err => {
