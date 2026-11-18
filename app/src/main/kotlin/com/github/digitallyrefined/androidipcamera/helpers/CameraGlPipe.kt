@@ -58,8 +58,12 @@ class CameraGlPipe(
     private val secondaryRequest = java.util.concurrent.atomic.AtomicReference<SecondaryRequest?>()
     private var texId = 0
     private var program = 0
-    private var aPos = 0; private var aTex = 0; private var uST = 0; private var uMirror = 0
+    private var aPos = 0; private var aTex = 0; private var uST = 0; private var uMirror = 0; private var uCrop = 0
     @Volatile var mirror = false
+    /** Crop camera texture in GPU before H264 encoding, preserving source pixels. */
+    @Volatile var roiZoom = 1f
+    @Volatile var roiCenterX = .5f
+    @Volatile var roiCenterY = .5f
     /** Clockwise rotation (degrees) applied to the camera frame. This is the only rotation source:
      *  the surface transform's sensor orientation is deliberately ignored (quantised to 90° steps). */
     @Volatile var rotation: Int = 0
@@ -246,6 +250,8 @@ class CameraGlPipe(
         GLES20.glEnableVertexAttribArray(aTex)
         GLES20.glUniformMatrix4fv(uST, 1, false, stMatrix, 0)
         GLES20.glUniform1f(uMirror, if (mirror) 1f else 0f)
+        val roi = RoiCrop.window(roiZoom, roiCenterX, roiCenterY)
+        GLES20.glUniform4f(uCrop, roi.left, roi.top, roi.width, roi.height)
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
         GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, texId)
         GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
@@ -284,8 +290,8 @@ class CameraGlPipe(
         val vs = "attribute vec4 aPos; attribute vec4 aTex; uniform mat4 uST; varying vec2 vTex;\n" +
                  "void main(){ gl_Position = aPos; vTex = (uST * aTex).xy; }"
         val fs = "#extension GL_OES_EGL_image_external : require\n" +
-                 "precision mediump float; varying vec2 vTex; uniform samplerExternalOES sTex; uniform float uMirror;\n" +
-                 "void main(){ vec2 tc = vec2(mix(vTex.x, 1.0 - vTex.x, uMirror), vTex.y); gl_FragColor = texture2D(sTex, tc); }"
+                 "precision mediump float; varying vec2 vTex; uniform samplerExternalOES sTex; uniform float uMirror; uniform vec4 uCrop;\n" +
+                 "void main(){ vec2 tc = vec2(mix(vTex.x, 1.0 - vTex.x, uMirror), vTex.y); tc = uCrop.xy + tc * uCrop.zw; gl_FragColor = texture2D(sTex, tc); }"
         val p = GLES20.glCreateProgram()
         GLES20.glAttachShader(p, compile(GLES20.GL_VERTEX_SHADER, vs))
         GLES20.glAttachShader(p, compile(GLES20.GL_FRAGMENT_SHADER, fs))
@@ -294,6 +300,7 @@ class CameraGlPipe(
         aTex = GLES20.glGetAttribLocation(p, "aTex")
         uST = GLES20.glGetUniformLocation(p, "uST")
         uMirror = GLES20.glGetUniformLocation(p, "uMirror")
+        uCrop = GLES20.glGetUniformLocation(p, "uCrop")
         return p
     }
 
