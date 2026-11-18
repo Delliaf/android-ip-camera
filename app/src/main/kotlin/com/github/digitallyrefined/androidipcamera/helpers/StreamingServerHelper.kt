@@ -1330,6 +1330,9 @@ class StreamingServerHelper(
                 "manual_exposure_mode_$cameraId", "manual_exposure_mode_$physical",
                 "manual_iso_$cameraId", "manual_iso_$physical",
                 "manual_shutter_us_$cameraId", "manual_shutter_us_$physical",
+                "roi_zoom_$cameraId", "roi_zoom_$physical",
+                "roi_x_$cameraId", "roi_x_$physical",
+                "roi_y_$cameraId", "roi_y_$physical",
                 "focus_$cameraId", "focus_$physical",
                 "camera_rotate_$cameraId", "camera_rotate_$physical",
                 "stream_scale_$cameraId", "stream_scale_$physical",
@@ -1356,6 +1359,9 @@ class StreamingServerHelper(
                     "exposure_mode" to "auto",
                     "manual_iso" to "400",
                     "manual_shutter_us" to "20000",
+                    "roi_zoom" to "1",
+                    "roi_x" to "0.5",
+                    "roi_y" to "0.5",
                     "focus_distance" to "-1",
                     "scale" to "1.0",
                     "contrast" to "0",
@@ -1507,6 +1513,7 @@ class StreamingServerHelper(
         val rtspSubBitrate: String,
         val streamBitrateKbps: String,
         val mjpegQuality: String,
+        val captureResolution: String,
     )
 
     private data class DeviceInfo(
@@ -1593,6 +1600,7 @@ class StreamingServerHelper(
                 put("rtspSubBitrate", settings.rtspSubBitrate)
                 put("streamBitrateKbps", settings.streamBitrateKbps)
                 put("mjpegQuality", settings.mjpegQuality)
+                put("captureResolution", settings.captureResolution)
             })
             put("appVersion", context.packageManager.getPackageInfo(context.packageName, 0).versionName.orEmpty())
         }.toString()
@@ -1685,6 +1693,9 @@ class StreamingServerHelper(
             map["exposureMode"] = storedPrefString("auto", "manual_exposure_mode_") ?: "auto"
             map["manualIso"] = storedPrefString("400", "manual_iso_") ?: "400"
             map["manualShutterUs"] = storedPrefString("20000", "manual_shutter_us_") ?: "20000"
+            map["roiZoom"] = storedPrefString("1", "roi_zoom_") ?: "1"
+            map["roiX"] = storedPrefString("0.5", "roi_x_") ?: "0.5"
+            map["roiY"] = storedPrefString("0.5", "roi_y_") ?: "0.5"
 
             // Focus distance
             map["focusDistance"] = storedPrefString("-1", "focus_") ?: "-1"
@@ -1768,6 +1779,7 @@ class StreamingServerHelper(
                 ?: RtspServer.DEFAULT_SUB_BITRATE_KBPS.toString(),
             streamBitrateKbps = prefs.getString("stream_bitrate_kbps", "auto") ?: "auto",
             mjpegQuality = prefs.getString("mjpeg_quality", "auto") ?: "auto",
+            captureResolution = prefs.getString("capture_resolution", "match") ?: "match",
         )
     }
 
