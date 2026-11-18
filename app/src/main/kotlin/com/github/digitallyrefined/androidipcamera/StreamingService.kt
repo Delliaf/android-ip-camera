@@ -1143,6 +1143,42 @@ class StreamingService : LifecycleService() {
             .getString("stream_bitrate_kbps", "auto")?.toIntOrNull()?.takeIf { it in 250..100_000 }
 
     /**
+     * Experimental CameraX-only high-resolution capture for GPU ROI. The output encoder
+     * still uses desiredSize(); capture size is independent so the 4K source isn't
+     * downscaled before selecting the region of interest.
+     */
+    private fun sourceCaptureSize(output: Size): Size {
+        val pref = PreferenceManager.getDefaultSharedPreferences(this)
+            .getString("capture_resolution", "match") ?: "match"
+        return when (pref) {
+            "3840x2160" -> Size(3840, 2160)
+            "2560x1440" -> Size(2560, 1440)
+            else -> output
+        }
+    }
+
+    private fun roiConfig(): Triple<Float, Float, Float> {
+        val p = PreferenceManager.getDefaultSharedPreferences(this)
+        val id = camId()
+        val phys = id?.substringAfter(':', id)
+        fun read(prefix: String, default: Float): Float =
+            (id?.let { p.getString(prefix + it, null) }
+                ?: phys?.let { p.getString(prefix + it, null) })?.toFloatOrNull() ?: default
+        return Triple(read("roi_zoom_", 1f).coerceIn(1f, 8f),
+            read("roi_x_", .5f).coerceIn(0f, 1f),
+            read("roi_y_", .5f).coerceIn(0f, 1f))
+    }
+
+    private fun applyRoiToPipes() {
+        val (zoom, x, y) = roiConfig()
+        for (pipe in listOfNotNull(glPipe, cameraXGlPipe)) {
+            pipe.roiZoom = zoom
+            pipe.roiCenterX = x
+            pipe.roiCenterY = y
+        }
+    }
+
+    /**
      * The running session drew a camera frame lately, or only just started. One that stopped (camera
      * taken by another app, cameraserver restarted) is restarted by the next viewer change, as every
      * viewer change used to do. So is one whose H.264 encoder stopped while the camera kept running.
@@ -1290,7 +1326,8 @@ class StreamingService : LifecycleService() {
                 }
                 startCamera1Backend(want, demand)
             } else {
-                startCameraXBackend(want, demand, surfaceEncoder)
+                val source = if (surfaceEncoder) sourceCaptureSize(want) else want
+                startCameraXBackend(source, demand, surfaceEncoder)
                 // CameraX can bind without the session ever configuring (e.g. "Unable to configure
                 // camera ... TimeoutException") — no analysis frames ever arrive. Detect that and fall
                 // back to the Camera1 backend so streaming and snapshots keep working on such devices.
@@ -1443,7 +1480,7 @@ class StreamingService : LifecycleService() {
             // If the encoder rejects the portrait size, fall back to the byte-buffer YUV path,
             // which rotates in software — never to a landscape surface frame, which would make a
             // 90°/270° stream look horizontal.
-            val frame = surfaceEncoderSize(want)
+            val frame = surfaceEncoderSize(desiredSize())
             val enc = try {
                 newEncoder(frame)
             } catch (e: Exception) {
@@ -1461,6 +1498,8 @@ class StreamingService : LifecycleService() {
                 val pipe = CameraGlPipe(enc.inputSurface!!, enc.width, enc.height, fpsCoerced, standardBuffer = true).also {
                     it.mirror = readMirrorPref()
                     it.rotation = quantizedRotation(readRotatePref())
+                    val (zoom, x, y) = roiConfig()
+                    it.roiZoom = zoom; it.roiCenterX = x; it.roiCenterY = y
                     it.start()
                     cameraXGlPipe = it
                 }
@@ -1666,6 +1705,8 @@ class StreamingService : LifecycleService() {
         return CameraGlPipe(enc.inputSurface!!, frame.width, frame.height, fpsCoerced).also {
             it.mirror = readMirrorPref()
             it.rotation = quantizedRotation(readRotatePref())
+            val (zoom, x, y) = roiConfig()
+            it.roiZoom = zoom; it.roiCenterX = x; it.roiCenterY = y
             it.start()
             // Camera1 renders at [cameraSize]; the pipe turns that frame into [frame].
             it.setCameraBufferSize(cameraSize.width, cameraSize.height)
@@ -2222,6 +2263,22 @@ class StreamingService : LifecycleService() {
                         debouncedStartCamera()
                     }
                 }
+            }
+            "capture_resolution" -> {
+                if (value !in listOf("match", "2560x1440", "3840x2160")) return
+                prefs.edit().putString("capture_resolution", value).apply()
+                if (localRecorder?.isRecording != true) debouncedStartCamera()
+            }
+            "roi_zoom", "roi_x", "roi_y" -> {
+                if (id == null) return
+                val n = value.toFloatOrNull()?.takeIf { it.isFinite() } ?: return
+                val allowed = if (key == "roi_zoom") n in 1f..8f else n in 0f..1f
+                if (!allowed) return
+                val edit = prefs.edit().putString("${key}_$id", n.toString())
+                if (physicalId.isNotBlank() && physicalId != id)
+                    edit.putString("${key}_$physicalId", n.toString())
+                edit.apply()
+                launchMain { applyRoiToPipes() }
             }
             "stream_bitrate_kbps" -> {
                 val kbps = value.toIntOrNull()
