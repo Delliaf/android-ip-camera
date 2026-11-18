@@ -60,7 +60,9 @@ class StreamingServerHelper(
     private val onRecordStart: () -> Triple<Boolean, String, String> = { Triple(false, "503 Service Unavailable", """{"error":"unavailable"}""") },
     private val onRecordStop: () -> Triple<Boolean, String, String> = { Triple(false, "409 Conflict", """{"error":"not_recording"}""") },
     private val onRecordStatus: () -> String = { """{"recording":false}""" },
-    private val onStreamingEnabledChanged: (Boolean) -> Unit = {}
+    private val onStreamingEnabledChanged: (Boolean) -> Unit = {},
+    private val sourceFrameSize: () -> Pair<Int, Int>? = { null },
+    private val gpuFrameSize: () -> Pair<Int, Int>? = { null }
 ) {
     data class Client(
         val socket: Socket,
@@ -1523,6 +1525,8 @@ class StreamingServerHelper(
         val wifiStrength: Int,
         val settings: StreamSettings,
         val perCameraSettings: Map<String, Map<String, String>> = emptyMap(),
+        val sourceSize: Pair<Int, Int>? = null,
+        val gpuSize: Pair<Int, Int>? = null,
     ) {
         fun toJsonString(): String = JSONObject().apply {
             put("cameras", JSONArray().apply {
@@ -1572,6 +1576,13 @@ class StreamingServerHelper(
             })
             put("batteryPercent", batteryPercent)
             put("wifiStrength", wifiStrength)
+            // Real negotiated sizes, rather than a desired 4K label.
+            put("captureFrame", JSONObject().apply {
+                put("analysisWidth", sourceSize?.first ?: 0)
+                put("analysisHeight", sourceSize?.second ?: 0)
+                put("gpuInputWidth", gpuSize?.first ?: 0)
+                put("gpuInputHeight", gpuSize?.second ?: 0)
+            })
             put("settings", JSONObject().apply {
                 // Keep global stream-level settings here; per-camera lens settings are exposed
                 // under `cameras[].lensSettings` and should be used by the UI.
@@ -1725,6 +1736,8 @@ class StreamingServerHelper(
             wifiStrength = getWifiStrength(),
             settings = getStreamSettings(cameraList),
             perCameraSettings = perCamera,
+            sourceSize = sourceFrameSize(),
+            gpuSize = gpuFrameSize(),
         )
     }
 
