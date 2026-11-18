@@ -790,7 +790,7 @@ class StreamingService : LifecycleService() {
                 OnvifStreamInfo(
                     rtspUrl = "$scheme://${getLocalIpAddress()}:$rtspPort${RtspServer.PATH}",
                     width = size.width, height = size.height, fps = fps,
-                    bitrateKbps = H264HardwareEncoder.bitrateFor(size.width, size.height) / 1000,
+                    bitrateKbps = H264HardwareEncoder.bitrateFor(size.width, size.height, mainBitrateKbps()) / 1000,
                 )
             },
             credentials = { streamCredentials() },
@@ -1138,6 +1138,10 @@ class StreamingService : LifecycleService() {
     private fun streamFps(): Int =
         (PreferenceManager.getDefaultSharedPreferences(this).getString("stream_fps", "30")?.toIntOrNull() ?: 30).coerceIn(1, 60)
 
+    private fun mainBitrateKbps(): Int? =
+        PreferenceManager.getDefaultSharedPreferences(this)
+            .getString("stream_bitrate_kbps", "auto")?.toIntOrNull()?.takeIf { it in 250..100_000 }
+
     /**
      * The running session drew a camera frame lately, or only just started. One that stopped (camera
      * taken by another app, cameraserver restarted) is restarted by the next viewer change, as every
@@ -1431,7 +1435,7 @@ class StreamingService : LifecycleService() {
                 size.width,
                 size.height,
                 fpsCoerced,
-                H264HardwareEncoder.bitrateFor(size.width, size.height),
+                H264HardwareEncoder.bitrateFor(size.width, size.height, mainBitrateKbps()),
                 true // useSurface = true
             ) { d, k, pts -> h264.broadcastH264(d, k, pts) }
 
@@ -1656,7 +1660,7 @@ class StreamingService : LifecycleService() {
         val fps = prefs.getString("stream_fps", "30")?.toIntOrNull() ?: 30
         val fpsCoerced = fps.coerceIn(1, 60)
         val frame = surfaceEncoderSize(cameraSize)
-        val enc = H264HardwareEncoder(frame.width, frame.height, fpsCoerced, H264HardwareEncoder.bitrateFor(frame.width, frame.height), true) { d, k, pts -> h264StreamingEncoder?.broadcastH264(d, k, pts) }
+        val enc = H264HardwareEncoder(frame.width, frame.height, fpsCoerced, H264HardwareEncoder.bitrateFor(frame.width, frame.height, mainBitrateKbps()), true) { d, k, pts -> h264StreamingEncoder?.broadcastH264(d, k, pts) }
         h264StreamingEncoder?.setEncoder(enc)
         streamingServerHelper?.resetH264Wait()
         return CameraGlPipe(enc.inputSurface!!, frame.width, frame.height, fpsCoerced).also {
@@ -2218,6 +2222,17 @@ class StreamingService : LifecycleService() {
                         debouncedStartCamera()
                     }
                 }
+            }
+            "stream_bitrate_kbps" -> {
+                val kbps = value.toIntOrNull()
+                if (value != "auto" && (kbps == null || kbps !in 250..100_000)) return
+                prefs.edit().putString("stream_bitrate_kbps", value).apply()
+                // Surface and YUV encoders read this preference when they are created.
+                if (captureRunning && localRecorder?.isRecording != true) debouncedStartCamera()
+            }
+            "mjpeg_quality" -> {
+                if (value != "auto" && (value.toIntOrNull() ?: 0) !in 30..100) return
+                prefs.edit().putString("mjpeg_quality", value).apply()
             }
             // RTSP sub stream and audio settings. The RTSP server reads them when a viewer
             // connects, so a change applies to the next connection (as the old Settings screen did).
