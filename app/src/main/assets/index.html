@@ -619,6 +619,26 @@
             </select>
             <small>High quality requires more CPU and bandwidth. Memory pressure may temporarily lower quality.</small>
 
+            <p class="group-title">Sensor crop (experimental)</p>
+            <label for="captureResolution">Camera capture resolution</label>
+            <select id="captureResolution" data-control="capture_resolution">
+              <option value="match">Match encoded stream (stable)</option>
+              <option value="2560x1440">Request 2560×1440 source</option>
+              <option value="3840x2160">Request 3840×2160 (4K) source</option>
+            </select>
+            <small>On CameraX with the H.264 GPU pipeline: keep stream output at 1920×1080, request 4K source, then crop. Actual source resolution depends on Camera2 and active use-case combination. Camera1 and MJPEG may not use the 4K source.</small>
+
+            <label for="roiZoom">Source ROI zoom <span class='val-badge' id='roiZoomVal'>1×</span></label>
+            <input id="roiZoom" type="range" min="1" max="8" step="0.1" value="1"
+              data-control="roi_zoom" data-badge="roiZoomVal" data-fmt="suffix" data-suffix="×">
+            <label for="roiX">ROI horizontal center <span class='val-badge' id='roiXVal'>0.5</span></label>
+            <input id="roiX" type="range" min="0" max="1" step="0.01" value="0.5"
+              data-control="roi_x" data-badge="roiXVal">
+            <label for="roiY">ROI vertical center <span class='val-badge' id='roiYVal'>0.5</span></label>
+            <input id="roiY" type="range" min="0" max="1" step="0.01" value="0.5"
+              data-control="roi_y" data-badge="roiYVal">
+            <small>Crop is applied on the GPU before H.264/RTSP encoding, not to MJPEG browser preview. Select the H.264 viewer to inspect the crop. 2× takes a quarter of the source area.</small>
+
             <p class="group-title">Camera Control</p>
 
             <label for="resolutionSelect">Resolution <span class='val-badge' id='resolutionVal'>&mdash;</span></label>
@@ -1065,7 +1085,7 @@
     function normalizeValueForKey(key, val) {
       if (val === null || val === undefined) return val;
       // Numeric settings should be stored as numbers when possible
-      if (['zoom', 'exposure', 'rotate', 'scale', 'contrast', 'focusDistance'].includes(key)) {
+      if (['zoom', 'exposure', 'rotate', 'scale', 'contrast', 'focusDistance', 'roiZoom', 'roiX', 'roiY'].includes(key)) {
         const n = parseFloat(val);
         return Number.isFinite(n) ? n : val;
       }
