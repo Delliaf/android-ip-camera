@@ -1505,6 +1505,8 @@ class StreamingServerHelper(
         val rtspSubSize: String,
         val rtspSubFps: String,
         val rtspSubBitrate: String,
+        val streamBitrateKbps: String,
+        val mjpegQuality: String,
     )
 
     private data class DeviceInfo(
@@ -1589,6 +1591,8 @@ class StreamingServerHelper(
                 put("rtspSubSize", settings.rtspSubSize)
                 put("rtspSubFps", settings.rtspSubFps)
                 put("rtspSubBitrate", settings.rtspSubBitrate)
+                put("streamBitrateKbps", settings.streamBitrateKbps)
+                put("mjpegQuality", settings.mjpegQuality)
             })
             put("appVersion", context.packageManager.getPackageInfo(context.packageName, 0).versionName.orEmpty())
         }.toString()
@@ -1762,6 +1766,8 @@ class StreamingServerHelper(
                 ?: RtspServer.DEFAULT_SUB_FPS.toString(),
             rtspSubBitrate = prefs.getString(RtspServer.PREF_SUB_BITRATE, null)
                 ?: RtspServer.DEFAULT_SUB_BITRATE_KBPS.toString(),
+            streamBitrateKbps = prefs.getString("stream_bitrate_kbps", "auto") ?: "auto",
+            mjpegQuality = prefs.getString("mjpeg_quality", "auto") ?: "auto",
         )
     }
 
