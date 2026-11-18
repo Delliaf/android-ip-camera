@@ -45,6 +45,17 @@ jobs:
         with:
           targets: aarch64-linux-android,armv7-linux-androideabi
 
+      - name: Validate embedded browser JavaScript
+        run: |
+          python3 - <<'PY'
+          import pathlib, re
+          source = pathlib.Path("app/src/main/assets/index.html").read_text(encoding="utf-8")
+          match = re.search(r"<script>(.*?)</script>", source, re.DOTALL | re.IGNORECASE)
+          assert match, "Embedded camera dashboard JavaScript is missing"
+          pathlib.Path("/tmp/android-ip-camera-dashboard.js").write_text(match.group(1), encoding="utf-8")
+          PY
+          node --check /tmp/android-ip-camera-dashboard.js
+
       - name: Test and build debug APK
         run: |
           chmod +x ./gradlew
