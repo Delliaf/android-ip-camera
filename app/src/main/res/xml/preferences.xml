@@ -117,6 +117,14 @@
             android:defaultValue="false" />
     </PreferenceCategory>
 
+    <PreferenceCategory android:title="Device Monitoring">
+        <CheckBoxPreference
+            android:key="metrics_root_thermal_enabled"
+            android:title="Use root for CPU / SoC temperature when needed"
+            android:summary="Optional. If Android 8 blocks /sys/class/thermal or /proc/stat, try read-only su commands with a short timeout. Never changes hardware settings. Leave OFF if you do not trust root access."
+            android:defaultValue="false" />
+    </PreferenceCategory>
+
     <PreferenceCategory android:title="Certificate Settings">
         <CheckBoxPreference
             android:key="tls_enabled"

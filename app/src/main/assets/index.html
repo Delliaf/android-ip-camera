@@ -506,8 +506,8 @@
       <div id="statusOverlay" class="status-overlay" style="display: none;">
         <span id="wifiStatus" title="WiFi Strength">🛜 --%</span>
         <span id="batteryStatus" title="Battery Status">🔋 --%</span>
-        <span id="cpuStatus" title="CPU usage">CPU --%</span>
-        <span id="temperatureStatus" title="CPU / SoC or battery temperature">🌡️ --°C</span>
+        <span id="cpuStatus" title="Waiting for CPU measurements">🖥️ CPU …</span>
+        <span id="temperatureStatus" title="Checking thermal sensors">🌡️ Temp …</span>
       </div>
       <div id="streamLoading" class="stream-loading">Loading...</div>
       <canvas id='streamCanvas'></canvas>
@@ -1632,11 +1632,33 @@
     setInterval(() => loadDeviceInfo(false), 60000);
     // Low-overhead readout; don't re-enumerate Camera2 for every CPU poll.
     function pollDeviceMetrics() {
-      fetch('/metrics.json', {cache: 'no-store'})
-        .then(resp => { if (!resp.ok) throw new Error('Metrics unavailable'); return resp.json(); })
-        .then(updateStatusOverlay)
-        .catch(() => {}); // Transient reconnect: keep last live status.
+      fetch('/metrics.json', {cache: 'no-store', credentials: 'same-origin'})
+        .then(resp => {
+          if (!resp.ok) throw new Error('HTTP ' + resp.status);
+          return resp.json();
+        })
+        .then(data => updateStatusOverlay(data))
+        .catch(err => {
+          // Previously every fetch failure was swallowed AND hidden fields
+          // silently stayed invisible. Show a useful diagnostic instead.
+          console.warn('Device metrics request failed:', err);
+          const cpu = getElById('cpuStatus');
+          const temp = getElById('temperatureStatus');
+          if (cpu) {
+            cpu.style.display = 'flex';
+            cpu.textContent = '🖥️ CPU —';
+            cpu.title = '/metrics.json unavailable: ' + err.message;
+          }
+          if (temp) {
+            temp.style.display = 'flex';
+            temp.textContent = '🌡️ Temp —';
+            temp.title = '/metrics.json unavailable: ' + err.message;
+          }
+          const overlay = getElById('statusOverlay');
+          if (overlay) overlay.style.display = 'flex';
+        });
     }
+    pollDeviceMetrics();
     setInterval(pollDeviceMetrics, 5000);
 
     function stopMjpegStream() {
@@ -2311,27 +2333,33 @@
       }
 
       if (cpuEl) {
-        if (typeof data.cpuPercent === 'number' && data.cpuPercent >= 0) {
+        cpuEl.style.display = 'flex';
+        if (typeof data.cpuPercent === 'number' &&
+            Number.isFinite(data.cpuPercent) && data.cpuPercent >= 0) {
           const scope = data.cpuScope === 'app' ? 'App CPU' : 'CPU';
-          cpuEl.style.display = 'flex';
           cpuEl.textContent = '🖥️ ' + scope + ' ' + Math.round(data.cpuPercent) + '%';
-          cpuEl.title = data.cpuScope === 'app'
-            ? 'Only the Android IP Camera app; system-wide CPU stats are blocked'
-            : 'Total system CPU usage, sampled from /proc/stat';
-        } else cpuEl.style.display = 'none';
+          cpuEl.title = data.cpuNote || (data.cpuScope === 'app'
+            ? 'Only this app; system CPU access denied' : 'Total system CPU usage');
+        } else {
+          cpuEl.textContent = '🖥️ CPU …';
+          cpuEl.title = data.cpuNote || 'First sample warming up; retrying in 5 seconds';
+        }
       }
       if (temperatureEl) {
+        temperatureEl.style.display = 'flex';
         if (typeof data.temperatureCelsius === 'number' &&
             Number.isFinite(data.temperatureCelsius)) {
           const label = ['CPU', 'SoC', 'Battery'].includes(data.temperatureSource)
             ? data.temperatureSource : 'Temp';
-          temperatureEl.style.display = 'flex';
           temperatureEl.textContent = '🌡️ ' + label + ' ' +
             data.temperatureCelsius.toFixed(1) + '°C';
-          temperatureEl.title = label === 'Battery'
-            ? 'Battery temperature (not CPU temperature)'
-            : label + ' thermal sensor temperature';
-        } else temperatureEl.style.display = 'none';
+          temperatureEl.title = data.temperatureNote || (label === 'Battery'
+            ? 'Battery temperature (NOT CPU temperature)' : 'Named thermal sensor');
+        } else {
+          temperatureEl.textContent = '🌡️ Temp —';
+          temperatureEl.title = data.temperatureNote ||
+            'No temperature data. Enable optional root thermal access in Android app settings.';
+        }
       }
 
       if (overlay) {

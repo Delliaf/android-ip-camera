@@ -20,6 +20,17 @@ class DevicePerformanceMonitorTest {
         assertNull(CpuMath.parse("cpu broken"))
     }
 
+    @Test fun recognizesQualcommH872SensorsWithoutMislabelingBattery() {
+        assertEquals("SoC", CpuMath.thermalType("tsens_tz_sensor7\\n"))
+        assertEquals("SoC", CpuMath.thermalType("msm-therm"))
+        assertEquals("SoC", CpuMath.thermalType("ap-therm"))
+        assertEquals("CPU", CpuMath.thermalType("cpu0-usr"))
+        assertEquals("CPU", CpuMath.thermalType("cpu-cluster1"))
+        assertNull(CpuMath.thermalType("battery"))
+        assertNull(CpuMath.thermalType("pa_therm0"))
+        assertNull(CpuMath.thermalType("unknown"))
+    }
+
     @Test fun normalizeCommonAndroidThermalFormats() {
         assertEquals(42.5, CpuMath.thermalCelsius("42500\n")!!, 0.0001)
         assertEquals(42.5, CpuMath.thermalCelsius("425")!!, 0.0001)
