@@ -1183,8 +1183,12 @@ class StreamingService : LifecycleService() {
             read("roi_y_", .5f).coerceIn(0f, 1f))
     }
 
-    private fun lgMain0ZoomMode(p: SharedPreferences): String =
-        LgG6Main0Profile.zoomMode(p.getString(LgG6Main0Profile.PREF_ZOOM_MODE, "isp"))
+    private fun lgMain0ZoomMode(p: SharedPreferences): String {
+        val requested = LgG6Main0Profile.zoomMode(p.getString(LgG6Main0Profile.PREF_ZOOM_MODE, "isp"))
+        return if (requested == "vendor" &&
+            LgG6Main0Profile.VENDOR_ZOOM !in LgG6Main0VendorProbe.capabilities(this)) "isp"
+        else requested
+    }
 
     private fun lgMain0Zoom(p: SharedPreferences): Float =
         (p.getString(LgG6Main0Profile.PREF_ZOOM, "4.0")?.toFloatOrNull() ?: 4f).coerceIn(1f, 8f)
@@ -2246,6 +2250,21 @@ class StreamingService : LifecycleService() {
                         if (mode == "manual") iso else null,
                         if (mode == "manual") shutter else null)
                 }
+            }
+            "lg_main0_preset" -> {
+                if (!LgG6Main0Profile.isTarget(id)) return
+                if (value !in listOf("isp4", "gpu4", "safe")) return
+                val edit = prefs.edit()
+                    .putString(LgG6Main0Profile.PREF_ZOOM_MODE,
+                        if (value == "gpu4") "gpu" else "isp")
+                    .putString(LgG6Main0Profile.PREF_ZOOM, if (value == "safe") "1.0" else "4.0")
+                    .putString("stream_res", "960x540")
+                    .putString("capture_resolution", if (value == "gpu4") "3840x2160" else "match")
+                    .putString("stream_fps", "15")
+                    .putString("stream_bitrate_kbps", "2000")
+                    .putString("mjpeg_quality", "90")
+                edit.apply()
+                if (localRecorder?.isRecording != true) debouncedStartCamera()
             }
             "lg_main0_zoom_mode", "lg_main0_zoom", "lg_main0_focus_mode",
             "lg_main0_focus_diopters", "lg_main0_postraw_boost", "lg_main0_peaking",
