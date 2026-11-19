@@ -612,7 +612,7 @@ class StreamingServerHelper(
             }
 
             // Handle Control UI and Commands
-            if (uri == "/" || uri == "") {
+            if (path == "/" || path == "") {
                 val htmlResponse = try {
                     context.assets.open("index.html").bufferedReader().use { it.readText() }
                 } catch (e: Exception) {
