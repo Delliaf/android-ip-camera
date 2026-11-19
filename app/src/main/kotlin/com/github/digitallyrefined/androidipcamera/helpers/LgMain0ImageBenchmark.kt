@@ -356,10 +356,34 @@ internal class LgMain0ImageBenchmark(private val context: Context) {
                 val opened = camera ?: throw (openError ?: IllegalStateException("Camera0 unavailable"))
                 for (size in allSizes) {
                     if (cancelled.get()) break
-                    progress("Trying YUV ${size.width}x${size.height}")
-                    if (makeSession(opened, size)) { chosen = size; break }
+                    progress("Probing YUV ${size.width}x${size.height}")
+                    if (!makeSession(opened, size)) continue
+                    // Some OEM HALs accept a high-res session but NEVER emit an
+                    // ImageReader frame. Verify actual delivery before selecting it.
+                    try {
+                        flushImages()
+                        val baseline = requestFor(LgBenchmarkCase(1, "cpu"), size, square)
+                        session?.setRepeatingRequest(baseline, captureCallback, handler)
+                            ?: error("Camera0 session unavailable")
+                        collecting = true
+                        val probe = pendingImages.poll(6, TimeUnit.SECONDS)
+                        collecting = false
+                        if (probe != null) {
+                            probe.use { img ->
+                                progress("Confirmed YUV frame ${img.width}x${img.height}")
+                            }
+                            chosen = size
+                            break
+                        }
+                        progress("Session accepted ${size.width}x${size.height}, but no YUV frame; trying smaller")
+                    } catch (e: Exception) {
+                        progress("YUV ${size.width}x${size.height} failed: ${e.message}; trying smaller")
+                    } finally {
+                        collecting = false
+                        flushImages()
+                    }
                 }
-                check(chosen.width > 0) { "No Camera0 YUV session could be configured" }
+                check(chosen.width > 0) { "No Camera0 YUV size produced a real frame" }
                 val source = chosen
                 progress("Camera0 negotiated ${source.width}x${source.height}; running ${cases.size} 4.5x cases")
                 write("device.json", manifest(source, deep, square, allSizes, cases.size)
