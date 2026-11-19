@@ -1335,6 +1335,7 @@ class StreamingServerHelper(
                 "lg0_zoom_mode_$cameraId", "lg0_zoom_mode_$physical",
                 "lg0_focus_diopters_$cameraId", "lg0_focus_diopters_$physical",
                 "lg0_post_raw_boost_$cameraId", "lg0_post_raw_boost_$physical",
+                "lg0_peaking_$cameraId", "lg0_peaking_$physical",
                 "roi_zoom_$cameraId", "roi_zoom_$physical",
                 "roi_x_$cameraId", "roi_x_$physical",
                 "roi_y_$cameraId", "roi_y_$physical",
@@ -1367,6 +1368,7 @@ class StreamingServerHelper(
                     "lg0_zoom_mode" to "isp",
                     "lg0_focus_diopters" to "auto",
                     "lg0_post_raw_boost" to "off",
+                    "lg0_peaking" to "off",
                     "roi_zoom" to "1",
                     "roi_x" to "0.5",
                     "roi_y" to "0.5",
@@ -1535,6 +1537,8 @@ class StreamingServerHelper(
         val gpuSize: Pair<Int, Int>? = null,
         val lgMain0Target: Boolean = false,
         val lgMain0Diagnostics: Boolean = false,
+        val lgVendorZoomAdvertised: Boolean = false,
+        val lgVendorPeakingAdvertised: Boolean = false,
         val lgMain0Sample: LgG6Main0Probe.Sample? = null,
     ) {
         fun toJsonString(): String = JSONObject().apply {
@@ -1589,6 +1593,8 @@ class StreamingServerHelper(
             put("lgMain0", JSONObject().apply {
                 put("target", lgMain0Target)
                 put("diagnostics", lgMain0Diagnostics)
+                put("vendorZoomAdvertised", lgVendorZoomAdvertised)
+                put("vendorPeakingAdvertised", lgVendorPeakingAdvertised)
                 put("readback", JSONObject().apply {
                     val s = lgMain0Sample
                     put("valid", s != null)
@@ -1734,6 +1740,7 @@ class StreamingServerHelper(
             map["lgZoomMode"] = storedPrefString("isp", "lg0_zoom_mode_") ?: "isp"
             map["lgFocusDiopters"] = storedPrefString("auto", "lg0_focus_diopters_") ?: "auto"
             map["lgPostRawBoost"] = storedPrefString("off", "lg0_post_raw_boost_") ?: "off"
+            map["lgPeaking"] = storedPrefString("off", "lg0_peaking_") ?: "off"
             map["roiZoom"] = storedPrefString("1", "roi_zoom_") ?: "1"
             map["roiX"] = storedPrefString("0.5", "roi_x_") ?: "0.5"
             map["roiY"] = storedPrefString("0.5", "roi_y_") ?: "0.5"
@@ -1773,6 +1780,10 @@ class StreamingServerHelper(
             gpuSize = gpuFrameSize(),
             lgMain0Target = lgTarget,
             lgMain0Diagnostics = debugEnabled,
+            lgVendorZoomAdvertised = lgTarget && LgG6Main0Probe.advertisedRequestKey(
+                context, "0", LgG6Main0Probe.VENDOR_ZOOM),
+            lgVendorPeakingAdvertised = lgTarget && LgG6Main0Probe.advertisedRequestKey(
+                context, "0", LgG6Main0Probe.VENDOR_PEAKING),
             lgMain0Sample = if (debugEnabled) LgG6Main0Probe.latest else null,
         )
     }
@@ -1904,7 +1915,9 @@ class StreamingServerHelper(
 
             sources.map { source ->
                 val ch = source.sizesCharacteristics
-                val label = cameraLabel(source)
+                val label = if (LgG6Main0Probe.isTarget(source.id))
+                    "LG G6 H872 · MAIN0 · 4.03mm f/1.8 · manual focus"
+                    else cameraLabel(source)
                 val set = LinkedHashSet<Pair<Int, Int>>()
                 try {
                     val map = ch.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
