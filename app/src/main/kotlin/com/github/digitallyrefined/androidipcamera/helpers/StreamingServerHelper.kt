@@ -979,6 +979,7 @@ class StreamingServerHelper(
                     put("cpuScope", sample.cpuScope)
                     put("cpuNote", sample.cpuNote)
                     put("temperatureCelsius", sample.temperatureCelsius ?: JSONObject.NULL)
+                    put("batteryTemperatureCelsius", sample.batteryTemperatureCelsius ?: JSONObject.NULL)
                     put("temperatureSource", sample.temperatureSource)
                     put("temperatureNote", sample.temperatureNote)
                     put("metricsVersion", 2)
@@ -1604,6 +1605,7 @@ class StreamingServerHelper(
         val cpuPercent: Int,
         val cpuScope: String,
         val temperatureCelsius: Double?,
+        val batteryTemperatureCelsius: Double?,
         val temperatureSource: String,
         val settings: StreamSettings,
         val perCameraSettings: Map<String, Map<String, String>> = emptyMap(),
@@ -1667,6 +1669,7 @@ class StreamingServerHelper(
             put("cpuPercent", cpuPercent)
             put("cpuScope", cpuScope)
             put("temperatureCelsius", temperatureCelsius ?: JSONObject.NULL)
+            put("batteryTemperatureCelsius", batteryTemperatureCelsius ?: JSONObject.NULL)
             put("temperatureSource", temperatureSource)
             // Real negotiated sizes, rather than a desired 4K label.
             put("captureFrame", JSONObject().apply {
@@ -1847,6 +1850,7 @@ class StreamingServerHelper(
             cpuPercent = performance.cpuPercent,
             cpuScope = performance.cpuScope,
             temperatureCelsius = performance.temperatureCelsius,
+            batteryTemperatureCelsius = performance.batteryTemperatureCelsius,
             temperatureSource = performance.temperatureSource,
             settings = getStreamSettings(cameraList),
             perCameraSettings = perCamera,
