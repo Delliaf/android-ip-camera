@@ -137,7 +137,18 @@ internal class LgG6Main0DirectCapture(
         }
     }
 
-    private fun mutate(action: () -> Unit) { if (!closed) handler.post { if (!closed) { action(); submit() } } }
+    private val applyPending = Runnable { if (!closed) submit() }
+    private fun mutate(action: () -> Unit) {
+        if (!closed) handler.post {
+            if (!closed) {
+                action()
+                // applyStored() sets many camera parameters in rapid succession;
+                // submit one combined repeating request, not 8 separate HAL requests.
+                handler.removeCallbacks(applyPending)
+                handler.postDelayed(applyPending, 40)
+            }
+        }
+    }
     override fun getTorch(): Boolean = torch
     override fun setTorch(on: Boolean) { mutate { torch = on } }
     override fun setExposure(ev: Int) { mutate { this.ev = ev } }
