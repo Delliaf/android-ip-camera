@@ -18,6 +18,9 @@ permissions:
 
 jobs:
   android:
+    # Internal PRs already have a push run. Avoid a second duplicate CI job
+    # that may fail on transient Maven network access and confuse diagnostics.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -56,10 +59,10 @@ jobs:
           PY
           node --check /tmp/android-ip-camera-dashboard.js
 
-      - name: Test and build debug APK
+      - name: Test and build debug APK (retry transient dependency failures)
         run: |
           chmod +x ./gradlew
-          ./gradlew :app:testDebugUnitTest :app:assembleDebug --no-daemon --max-workers=2
+          bash scripts/ci-gradle-retry.sh :app:testDebugUnitTest :app:assembleDebug --no-daemon --max-workers=2
 
       - name: Verify APK contains only arm64-v8a JNI libraries
         run: |
@@ -68,8 +71,9 @@ jobs:
           apks=(app/build/outputs/apk/debug/*.apk)
           test "${#apks[@]}" -eq 1
           apk="${apks[0]}"
-          unzip -Z1 "$apk" | grep -q '^lib/arm64-v8a/'
-          unexpected="$(unzip -Z1 "$apk" | grep '^lib/' | grep -v '^lib/arm64-v8a/' || true)"
+          unzip -Z1 "$apk" > "$RUNNER_TEMP/lg-g6-apk-entries.txt"
+          grep -q '^lib/arm64-v8a/' "$RUNNER_TEMP/lg-g6-apk-entries.txt"
+          unexpected="$(grep '^lib/' "$RUNNER_TEMP/lg-g6-apk-entries.txt" | grep -v '^lib/arm64-v8a/' || true)"
           if [ -n "$unexpected" ]; then
             echo "Unexpected non-arm64 libraries:"
             echo "$unexpected"
