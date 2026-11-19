@@ -36,7 +36,7 @@ jobs:
 
       - name: Build release APK (first)
         run: |
-          ./gradlew clean test :app:assembleRelease \
+          bash scripts/ci-gradle-retry.sh clean test :app:assembleRelease \
             -PskipSigning \
             --no-daemon \
             --max-workers=1 \
@@ -46,7 +46,7 @@ jobs:
 
       - name: Clean and build release APK (second)
         run: |
-          ./gradlew clean :app:assembleRelease \
+          bash scripts/ci-gradle-retry.sh clean :app:assembleRelease \
             -PskipSigning \
             --no-daemon \
             --max-workers=1 \
