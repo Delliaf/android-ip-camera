@@ -76,6 +76,11 @@
             android:defaultValue="8000"
             android:inputType="number"
             android:singleLine="true" />
+        <CheckBoxPreference
+            android:key="onvif_tls_enabled"
+            android:title="ONVIF over HTTPS (TLS)"
+            android:summary="Enabled by default if web HTTPS is enabled. Turn OFF for go2rtc onvif:// over HTTP; ONVIF credentials are then unencrypted on your LAN. Web/RTSP TLS are unchanged."
+            android:defaultValue="true" />
     </PreferenceCategory>
 
     <PreferenceCategory android:title="Recording">
@@ -116,7 +121,7 @@
         <CheckBoxPreference
             android:key="tls_enabled"
             android:title="Enable TLS/HTTPS"
-            android:summary="Use the same certificate for the web server, RTSPS, and ONVIF endpoints"
+            android:summary="Use HTTPS for the web server and RTSPS. ONVIF HTTPS can be controlled separately under RTSP / ONVIF."
             android:defaultValue="true" />
         <ListPreference
             android:key="tls_version"

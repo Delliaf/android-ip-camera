@@ -381,3 +381,140 @@ built/tested after these runs succeed; any doc-only HEAD can be newer.
 
 
 ==============================================================================
+
+
+SESSION 2026-11-19 ~15:25Z — go2rtc ONVIF reset; CPU and temperature overlay
+==============================================================================
+USER REPORT:
+  go2rtc POST http://PHONE_IP:8000/onvif/device_service
+  "read: connection reset by peer". Setting password did not help;
+  password is unwanted for trusted LAN. User requested total CPU usage and
+  temperature beside existing battery and Wi-Fi and noted other code
+  changes had landed since prior assistant work.
+
+BRANCH SAFETY:
+  Original feature/manual-camera-4k-stream HEAD at start:
+    986d3c8972334b1aa689478a3484b3ac8c304f66
+  That branch includes other recent work (LG direct AE FPS, gamma,
+  ISO >800 safety and latest 0.18.0-delliaf.4). The older
+  feature/lg-h872-main0 PR#2 was NOT overwritten.
+  Created NEW branch fix/onvif-go2rtc-telemetry from the exact SHA.
+  New draft PR: https://github.com/Delliaf/android-ip-camera/pull/3
+  PR targets feature/manual-camera-4k-stream and MUST remain unmerged
+  until LG G6 go2rtc hardware testing succeeds.
+
+CAUSE IDENTIFIED FROM REAL SOURCE (no guess about password):
+  TlsHelper.isEnabled() defaults TRUE; OnvifServer got
+  tls = { TlsHelper.serverConfig(this) } from StreamingService.
+  This binds tcp/8000 with HTTPS. Go2rtc onvif:// uses a plaintext HTTP
+  SOAP POST to http://PHONE:8000/onvif/device_service, so handshake
+  mismatch can reset TCP before SOAP authentication even begins.
+  The exact real-phone root cause still requires verification with TLS
+  change and go2rtc; the code path is confirmed.
+
+CHANGES:
+  - app/src/main/res/xml/preferences.xml: added onvif_tls_enabled (TRUE
+    by default to preserve existing encryption); settings text warns
+    plaintext ONVIF HTTP credentials are unencrypted.
+  - activities/SettingsActivity.kt: new ONVIF HTTPS toggle is visible
+    when RTSP/ONVIF enabled; defer StreamingService restart until the
+    new preference has been stored (avoids old-value restart race).
+  - StreamingService.kt: ONVIF TLS setting independent of web/RTSPS
+    TLS. Turning OFF ONVIF TLS serves HTTP on ONVIF port 8000 only.
+  - helpers/OnvifServer.kt: log SSL handshake and HTTP socket errors
+    (previously swallowed silently), pointing to scheme mismatch.
+  - app/src/test/.../OnvifServerTest.kt: REAL TCP no-auth HTTP SOAP
+    GetCapabilities and GetProfiles regression tests.
+  - DevicePerformanceMonitor.kt (NEW): use /proc/stat delta system
+    CPU % at >=4s intervals. If denied by Android, fallback to
+    Process.getElapsedCpuTime()/elapsedRealtime()/cores with
+    cpuScope="app" clearly labeled. CPU/SoC named thermal zone temp
+    sampled no faster than 20s; fallback to battery sticky broadcast
+    with temperatureSource="Battery". No root/su commands.
+  - StreamingServerHelper.kt: CPU, source and temperature in /info.json;
+    new AUTHENTICATED lightweight /metrics.json (same auth as other
+    endpoints) avoids costly Camera2 introspection each 5s.
+  - assets/index.html: CPU and properly labeled temperature beside
+    battery and Wi-Fi; 5s lightweight polling; responsive overlay.
+  - DevicePerformanceMonitorTest.kt (NEW): cpu counter delta/negative/
+    malformed inputs, thermal Celsius scaling. Kotlin JVM tests.
+  - GO2RTC_ONVIF_AND_METRICS.md (NEW): setup, HTTP SOAP verification,
+    no-auth trusted LAN instructions, HTTPS web/RTSPS distinction.
+  - app/build.gradle: versionCode 185, versionName
+    0.18.0-delliaf.5. arm64-v8a-only unchanged.
+  - .github/workflows/android8-fork-ci.yml: enable ARM64 CI on this
+    branch. No changes to original CI scripts/steps.
+
+NEW CI (PENDING / CHECK CONCLUSION FOR EXACT HEAD BEFORE CLAIMING TESTED):
+  Initial run https://github.com/Delliaf/android-ip-camera/actions/runs/44554322237
+    head 2764d96434 (superseded by preference-restart race fix)
+  New run https://github.com/Delliaf/android-ip-camera/actions/runs/44554725993
+    head 60e41c0419 (SettingsActivity deferred restart included)
+  Newly created PR #3 may generate "skipped" internal-PR jobs by
+  design. These are not failing builds. Actual push build on the
+  feature branch is the relevant Android test.
+  If CI is successful, download Actions artifact
+    android-ip-camera-android8-debug
+  Inspect lib/arm64-v8a only, build/version metadata and install on
+  LG-H872. Debug signature may conflict with installed APK.
+
+HOW TO CONFIRM USER ISSUE:
+  1) Install APK built for this exact HEAD, enable RTSP.
+  2) Settings > RTSP / ONVIF > ONVIF over HTTPS (TLS) = OFF.
+     Leave main web TLS = ON if desired. Optional: disable application
+     authentication separately for an isolated trusted LAN.
+  3) go2rtc stream: onvif://PHONE_IP:8000
+  4) Expect HTTP SOAP GetCapabilities/GetProfiles success; check
+     advertised RTSPS/RTSP next. App logcat ONVIF should show action.
+  5) Browser status now shows CPU system or App CPU fallback plus
+     CPU/SoC or Battery temperature with correct label. Check after
+     ~5-10s; verify readings against dumpsys/root diagnostics.
+  6) Run same connection test with TLS ON intentionally: expect
+     SSL/TLS handshake error until client uses HTTPS; ensure web HTTPS
+     and RTSPS have NOT been disabled by ONVIF toggle.
+  7) If HTTP still resets, inspect new OnvifServer logcat and go2rtc
+     DEBUG output; possible remaining issues: HTTP parser, chunked
+     request body, SOAP XML namespaces, device service advertised URLs.
+  8) Keep code and actual user logs separate; do NOT commit private IPs,
+     passwords, camera binaries or raw Android logs to the public repo.
+
+NEXT WORK:
+  Verify GitHub Actions for the *latest* functional commit.
+  Fix any Kotlin/unit tests, update this history with exact result SHA,
+  APK link and status. Keep PR #3 draft until physical go2rtc smoke test.
+==============================================================================
+
+
+VERIFIED CI RESULT — go2rtc / CPU telemetry, 2026-11-19 15:30:56 UTC
+==============================================================================
+GitHub Actions run:
+  https://github.com/Delliaf/android-ip-camera/actions/runs/44554725993
+Outcome: COMPLETED SUCCESS
+Exact TESTED FUNCTIONAL COMMIT:
+  60e41c041981a32b05e7e8468be73d8d568b2bbc
+Passing steps:
+  - JavaScript syntax validation for the embedded web dashboard
+  - :app:testDebugUnitTest + :app:assembleDebug (Gradle/Java17/Rust)
+  - Verify no non-arm64 native libraries inside debug APK
+  - Upload installable debug artifact
+Artifact:
+  android-ip-camera-android8-debug
+  artifact id 14545036925
+  https://github.com/Delliaf/android-ip-camera/actions/runs/44554725993
+  artifact compressed ZIP size 11,207,022 bytes (NOT unpacked APK size)
+Package version: 0.18.0-delliaf.5 (versionCode 185), Android 8+;
+  ARM64-V8A ONLY.
+
+Only the GO2RTC_ONVIF_AND_METRICS.md and DEVELOPMENT_HISTORY.txt docs
+were changed AFTER this tested code SHA. Changes to AGENTS.md are
+also documentation-only. Hence the successful build tests all functional
+ONVIF, metrics and settings changes in PR #3.
+
+No real-device go2rtc session has yet been verified, so keep the PR
+DRAFT; the diagnosis of a transport mismatch is supported by source code,
+but exact H872 network behavior and CPU-temperature availability require
+device logs. To use with go2rtc on an isolated/trusted LAN: turn OFF only
+"ONVIF over HTTPS (TLS)" in Settings > RTSP / ONVIF, restart,
+then configure onvif://PHONE_IP:8000. Turning OFF ONVIF HTTPS must NOT
+disable the main web TLS or RTSPS.
+==============================================================================

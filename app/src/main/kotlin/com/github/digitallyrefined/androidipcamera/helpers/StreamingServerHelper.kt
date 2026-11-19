@@ -135,6 +135,8 @@ class StreamingServerHelper(
 
     /** GET /files, GET|DELETE /files/<filename> — see [FileManager]. */
     private val fileManager = FileManager(context, onLog)
+    // Cache expensive temperature scans and delta-based CPU usage across HTTP polls.
+    private val performanceMonitor = DevicePerformanceMonitor(context)
 
     fun getClients(): List<Client> = clients.toList()
     fun getH264Clients(): List<Client> = h264Clients.toList()
@@ -930,6 +932,26 @@ class StreamingServerHelper(
                 return
             }
 
+            if (path == "/metrics.json") {
+                // Small authenticated endpoint, for frequent (5s) dashboard updates.
+                // Does not enumerate camera modes or touch the active capture session.
+                val sample = performanceMonitor.sample()
+                val metrics = JSONObject().apply {
+                    put("batteryPercent", getBatteryPercent())
+                    put("wifiStrength", getWifiStrength())
+                    put("cpuPercent", sample.cpuPercent)
+                    put("cpuScope", sample.cpuScope)
+                    put("temperatureCelsius", sample.temperatureCelsius ?: JSONObject.NULL)
+                    put("temperatureSource", sample.temperatureSource)
+                }.toString()
+                writer.print("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n")
+                writer.print("Cache-Control: no-store\r\nConnection: close\r\n\r\n")
+                writer.print(metrics)
+                writer.flush()
+                try { socket.close() } catch (_: Exception) {}
+                return
+            }
+
             if (path == "/info.json") {
                 val info = buildDeviceInfo()
                 writer.print("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n")
@@ -1537,6 +1559,10 @@ class StreamingServerHelper(
         val cameras: List<InfoCamera>,
         val batteryPercent: Int,
         val wifiStrength: Int,
+        val cpuPercent: Int,
+        val cpuScope: String,
+        val temperatureCelsius: Double?,
+        val temperatureSource: String,
         val settings: StreamSettings,
         val perCameraSettings: Map<String, Map<String, String>> = emptyMap(),
         val sourceSize: Pair<Int, Int>? = null,
@@ -1596,6 +1622,10 @@ class StreamingServerHelper(
             })
             put("batteryPercent", batteryPercent)
             put("wifiStrength", wifiStrength)
+            put("cpuPercent", cpuPercent)
+            put("cpuScope", cpuScope)
+            put("temperatureCelsius", temperatureCelsius ?: JSONObject.NULL)
+            put("temperatureSource", temperatureSource)
             // Real negotiated sizes, rather than a desired 4K label.
             put("captureFrame", JSONObject().apply {
                 put("analysisWidth", sourceSize?.first ?: 0)
@@ -1766,11 +1796,16 @@ class StreamingServerHelper(
             id to map
         }
 
+        val performance = performanceMonitor.sample()
         return DeviceInfo(
             context = context,
             cameras = cameraList,
             batteryPercent = getBatteryPercent(),
             wifiStrength = getWifiStrength(),
+            cpuPercent = performance.cpuPercent,
+            cpuScope = performance.cpuScope,
+            temperatureCelsius = performance.temperatureCelsius,
+            temperatureSource = performance.temperatureSource,
             settings = getStreamSettings(cameraList),
             perCameraSettings = perCamera,
             sourceSize = sourceFrameSize(),

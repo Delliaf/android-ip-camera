@@ -207,6 +207,32 @@ class OnvifServerTest {
         assertTrue(byteArrayOf(9, 8, 7).contentEquals(snap.inputStream.readBytes()))
     }
 
+    @Test fun `go2rtc style unauthenticated GetCapabilities and MediaProfiles work over plain HTTP`() {
+        val s = newServer(withCreds = false)
+        s.start()
+        val base = "http://127.0.0.1:${s.localPort}"
+        val calls = listOf(
+            "/onvif/device_service" to "<tds:GetCapabilities><tds:Category>All</tds:Category></tds:GetCapabilities>",
+            "/onvif/media_service" to "<trt:GetProfiles/>"
+        )
+        for ((path, request) in calls) {
+            val c = URL(base + path).openConnection() as HttpURLConnection
+            c.requestMethod = "POST"
+            c.doOutput = true
+            c.setRequestProperty("Content-Type", "application/soap+xml; charset=utf-8")
+            c.setRequestProperty("Connection", "close")
+            c.connectTimeout = 3000
+            c.readTimeout = 3000
+            c.outputStream.use { it.write(soap(request, "").toByteArray(Charsets.UTF_8)) }
+            assertEquals("POST $path must complete without reset", 200, c.responseCode)
+            val body = c.inputStream.use { it.readBytes().toString(Charsets.UTF_8) }
+            assertNotNull(OnvifXml.parse(body))
+            if (path.endsWith("device_service")) assertTrue(body.contains("GetCapabilitiesResponse"))
+            else assertTrue(body.contains("GetProfilesResponse"))
+            c.disconnect()
+        }
+    }
+
     // ---------------- WS-Discovery ----------------
 
     private val discovery = OnvifDiscovery(

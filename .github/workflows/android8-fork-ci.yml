@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feature/manual-camera-4k-stream
+      - fix/onvif-go2rtc-telemetry
     paths-ignore:
       - 'DEVELOPMENT_HISTORY.txt'
       - 'AGENTS.md'

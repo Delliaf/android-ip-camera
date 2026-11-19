@@ -812,8 +812,14 @@ class StreamingService : LifecycleService() {
             // stream is running (a snapshot opens the camera on demand and restores the stream).
             snapshot = { snapshot(camId()) },
             onLog = { Log.i(TAG, "ONVIF: $it"); onLog?.invoke("ONVIF: $it") },
-            // Same certificate as the web server; null when TLS is disabled.
-            tls = { TlsHelper.serverConfig(this) },
+            // Independent ONVIF transport setting: keep HTTPS as the default
+            // for existing installations; allow explicit LAN HTTP for go2rtc's
+            // onvif:// protocol without disabling web/RTSPS encryption.
+            tls = {
+                if (prefs.getBoolean("onvif_tls_enabled", true))
+                    TlsHelper.serverConfig(this)
+                else null
+            },
             bindAddress = ListenInterface.resolve(this)
         )
         try {

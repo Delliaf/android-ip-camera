@@ -342,6 +342,25 @@ class SettingsActivity : AppCompatActivity() {
                 }
             }
 
+            // ONVIF can speak HTTP independently of the web/RTSP TLS listeners.
+            // This is needed by go2rtc's onvif:// client, which starts with an HTTP POST.
+            findPreference<androidx.preference.CheckBoxPreference>("onvif_tls_enabled")?.apply {
+                setOnPreferenceChangeListener { _, enabled ->
+                    if (enabled == false && isRtspEnabled()) {
+                        Toast.makeText(requireContext(),
+                            "ONVIF HTTP is now available on the LAN; credentials are not encrypted",
+                            Toast.LENGTH_LONG).show()
+                    }
+                    // Preference callbacks run before the new value is persisted.
+                    // Schedule restart for the next main-loop turn so ONVIF opens
+                    // with the NEW TLS transport, not the previous setting.
+                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                        restartStreamingServer()
+                    }
+                    true
+                }
+            }
+
             // Add validation for certificate password
             findPreference<EditTextPreference>("certificate_password")?.apply {
                 // Do not pre-fill the existing certificate password when editing
@@ -775,7 +794,7 @@ class SettingsActivity : AppCompatActivity() {
         }
 
         private fun setOnvifOptionsVisible(visible: Boolean) {
-            listOf(PREF_ONVIF_NAME, PREF_ONVIF_PORT)
+            listOf(PREF_ONVIF_NAME, PREF_ONVIF_PORT, "onvif_tls_enabled")
                 .forEach { findPreference<Preference>(it)?.isVisible = visible }
         }
 
