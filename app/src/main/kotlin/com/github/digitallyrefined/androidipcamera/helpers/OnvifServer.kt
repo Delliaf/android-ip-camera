@@ -206,7 +206,18 @@ class OnvifServer(
                 writeResponse(out, resp, keepAlive)
                 if (!keepAlive) break
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            if (running && !stopped && e !is SocketTimeoutException) {
+                val source = remoteHost.get() ?: "?"
+                if (secure && e is javax.net.ssl.SSLException) {
+                    onLog("ONVIF TLS handshake failed from $source: ${e.javaClass.simpleName}. " +
+                        "If the client uses onvif:// (plain HTTP), turn OFF 'ONVIF over HTTPS' " +
+                        "in Settings; the web/RTSP HTTPS settings remain unchanged.")
+                } else {
+                    onLog("ONVIF HTTP connection from $source failed: " +
+                        "${e.javaClass.simpleName}: ${e.message}")
+                }
+            }
         } finally {
             openSockets -= sock
             try { sock.close() } catch (_: Exception) {}
