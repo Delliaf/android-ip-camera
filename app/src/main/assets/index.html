@@ -653,6 +653,10 @@
                 <option value="lg-main0-direct">Direct Camera2 photo-preview · experimental</option>
               </select>
               <small>Direct Camera2 can set true ZSL(5) and RECORD(3) templates. Use H.264/RTSP; MJPEG, snapshots, motion analysis and on-phone Preview fall back to CameraX.</small>
+              <label for="lgMain0DirectGamma">Direct Camera2 midtone brightness (gamma) <span id="lgDirectGammaVal" class="val-badge">0.80</span></label>
+              <input type="range" id="lgMain0DirectGamma" min="0.45" max="1.5" step="0.05" value="0.80"
+                  data-control="lg_main0_direct_gamma" data-badge="lgDirectGammaVal">
+              <small>0.45 = brighter dark tones, 0.80 = default correction, 1.00 = original untouched output; values above 1.00 darken. GPU-only tone correction, not sensor ISO or real extra detail. For true A/B comparison set 1.00.</small>
               <label for="lgMain0PreviewProfile">Direct Camera2 repeating-request template</label>
               <select id="lgMain0PreviewProfile" data-control="lg_main0_preview_profile">
                 <option value="zsl">Photo ZSL template 5 · OEM photo-mode A/B</option>
@@ -1203,6 +1207,7 @@
         lgMain0Backend: settings.api === 'lg-main0-direct' ? 'lg-main0-direct' : 'camerax',
         lgMain0OutputShape: settings.lgOutputShape,
         lgMain0PreviewProfile: settings.lgPreviewProfile,
+        lgMain0DirectGamma: settings.lgDirectGamma,
         lgMain0Processing: settings.lgProcessing,
         lgMain0ExtendedIso: settings.lgExtendedIso === true ? 'true' : 'false',
         lgMain0ZoomMode: settings.lgZoomMode,
@@ -1220,6 +1225,8 @@
       const direct = getElById('lgMain0Backend')?.value === 'lg-main0-direct';
       const profile = getElById('lgMain0PreviewProfile');
       if (profile) profile.disabled = !direct;
+      const gamma = getElById('lgMain0DirectGamma');
+      if (gamma) gamma.disabled = !direct;
       const processing = getElById('lgMain0Processing');
       if (processing) processing.disabled = direct;
       updateManualExposureUi();
@@ -1239,6 +1246,9 @@
       if (m) m.textContent = Number.isFinite(d) && d > 0 ? '~' + (1 / d).toFixed(2) + ' m' : '∞';
       const badge = getElById('lgMain0ZoomVal');
       if (badge) badge.textContent = (Number(getElById('lgMain0Zoom')?.value) || 4).toFixed(1) + '×';
+      const gammaBadge = getElById('lgDirectGammaVal');
+      if (gammaBadge) gammaBadge.textContent =
+        (Number(getElById('lgMain0DirectGamma')?.value) || 0.8).toFixed(2);
       const vendor = getElById('lgVendorInfo');
       if (vendor) vendor.textContent = 'OEM zoom ' + (cam.lgVendorZoomAvailable ? 'advertised' : 'unavailable') +
         ' · OEM peaking ' + (cam.lgVendorPeakingAvailable ? 'advertised' : 'unavailable') +
@@ -1275,7 +1285,7 @@
       }
       updateManualExposureSliders();
       if (notice) notice.textContent = supported
-        ? 'Camera2 MANUAL_SENSOR available. Select CameraX if using the legacy Camera1 capture backend.'
+        ? 'Manual sensor controls supported. Auto AE can use ISO above the advertised manual range; when AE is ON, template requestISO values are ignored. For the brightest direct preview, start with Auto AE.'
         : 'Manual ISO/shutter unavailable on this camera (Camera2 MANUAL_SENSOR not advertised).';
     }
 
@@ -1446,7 +1456,8 @@
         setTimeout(() => loadDeviceInfo(true), 1200);
       });
     }
-    for (const id of ['lgMain0Backend', 'lgMain0OutputShape', 'lgMain0Processing', 'lgMain0ExtendedIso',
+    for (const id of ['lgMain0Backend', 'lgMain0DirectGamma', 'lgMain0OutputShape',
+                      'lgMain0Processing', 'lgMain0ExtendedIso',
                       'lgMain0ZoomMode',
                       'lgMain0FocusMode', 'lgMain0FocusDiopters', 'lgMain0Zoom'])
       getElById(id)?.addEventListener('input', () => updateLgMain0Ui({settings: {}}, false));
