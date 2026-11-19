@@ -219,4 +219,91 @@ NEXT STEPS:
 6. APPEND verified run results and future changes to THIS TEXT FILE.
 
 
+
+SESSION UPDATE — 2026-11-19, LG-G6-main0-20261119-174003.zip
+---------------------------------------------------------------------------
+USER REPORT: Direct Camera2 extremely dark in EVERY template/profile. CameraX
+less dark. Manual ISO values over 800 did not appear to apply.
+ARCHIVE ANALYZED LOCALLY ONLY (26 files, ~229 KiB ZIP). DO NOT COMMIT the
+archive/raw logcat to public GitHub. Read-only Windows ADB capture 17:36..17:40.
+
+VERIFIED FROM ACTUAL LG H872 LOGS:
+- Direct Camera2 PHOTO_ZSL, VIDEO/RECORD, HQ, FAST and DEFAULT all produced
+  CaptureResult frames, but user's visual report is they are very dark.
+- With AUTO exposure, Camera0 reported ISO 2728 and shutter 66,666,672 ns
+  (~66.67ms, ~1/15 s), frame duration 66,771,888 ns. This was genuine
+  *result* ISO, while requestISO=100 / requestShutterNs=20651 in the old log
+  came from template DEFAULT values and ARE IGNORED WHEN AE IS AUTO.
+- With manual exposure, ISO 400 and ISO 800 were both actually applied:
+  result ISO400 at ~19.99ms, ISO800 at ~17.67ms; later ISO800 with
+  ~0.337ms shutter (very dark); also ~588ms shutter causing ~1.7fps.
+  No trace in this log of a successful manual request or result above ISO800.
+  This does NOT prove HAL never accepts >800; opt-in extended ISO needs a
+  fresh controlled test with AE=MANUAL and request vs result values.
+- Direct CaptureResult reports focusD=4.502924 throughout tested profiles;
+  probable stale manual focus. In code, applyStored() previously applied
+  legacy "focus_distance" prefs even when LG focus mode was "auto".
+- Direct source negotiated PRIVATE 960x720, not 4160x3120. Do not conclude
+  from this log that the direct photo mode ran at 13MP.
+- ISP NR modes differ: VIDEO/DEFAULT/FAST results NR=1 EDGE=1; HQ results
+  NR=2 EDGE=2; ZSL results NR=4 EDGE=3. This proves that the OEM
+  ZSL template toggles ISP processing, not that it matches the stock
+  LG Camera app's full image enhancement.
+- Qualcomm OMX video encoder twice failed configuration for 800x600
+  after mode switches (OMX UnsupportedSetting / MediaCodec CodecException
+  error 0xfffffc0e = -1010). Some dimensions are unsupported; avoid them.
+  The user also reported handshake errors but these are unrelated to sensor
+  exposure; no private IP addresses are preserved in this public journal.
+- Logs cannot determine visual brightness/color curve precisely without
+  recorded image frames; USER VISUAL REPORT is treated separately from HAL
+  readback. AUTO ISO 2728 shows manual 800 cap alone does not fully explain
+  dark Direct images; missing OEM ISP tone-processing is one hypothesis.
+
+COMMITS IN THIS SESSION (check current SHA via GitHub):
+- 390ba0b6 + 62b1740b: pure codec-safe 16-pixel aligned fallback math and
+  unit tests; 800x600 falls to 768x576 while preserving 4:3.
+- cd6bc92d: optional GLSL tone gamma applied to Direct Camera2 GPU output;
+  default 0.80 brightens midtones, 1.00 is neutral A/B reference; this is
+  NOT sensor ISO, not a way to recover lost sensor detail.
+- 5a266fcb: Direct AVC startup retries one aligned output size on -1010;
+  restore LG AUTO focus rather than legacy stale normalized manual focus;
+  read/write gamma pref and live GPU effect.
+- 2451849c: CaptureResult telemetry explicitly reports AE AUTO/MANUAL,
+  AE state, compensation and labels template requestISO ignored in auto AE.
+- a3cb9fdb: optional manual ISO>800 now detects rejected HAL requests or
+  persistent mismatched actual ISO and falls back safely to advertised range
+  without stopping the camera; automatically disables experimental switch.
+- 8131758f + 5075b0d9: info.json and LG web panel gain per-LG direct-gamma
+  control 0.45..1.50 and clear AE mode explanation.
+- 67666426: fixed own fallback unit test expectation (960x540 -> 768x432).
+- 891c55af: LG-H872 Camera0 uses 960x720 instead of 800x600 for legacy
+  "low/auto" output to avoid known QCOM encoder error; resolve camera ID
+  before calculating auto output size.
+- 588d4e5f: versionCode 183, versionName 0.18.0-delliaf.3.
+- Keep arm64-v8a only and PR1 DRAFT. No root HAL injection performed.
+
+BUILD STATUS:
+  Latest functional commit: 588d4e5f63b60cc8ef51538538d9600b711022d6.
+  Check GitHub Actions for EXACT SHA; DO NOT claim success until tests and
+  ARM64 APK artifact are produced. Since this text-only history commit is
+  paths-ignored by CI, look for runs on functional SHA above.
+  Browse: https://github.com/Delliaf/android-ip-camera/actions
+
+NEXT DEVICE TESTS:
+1. Install new arm64-v8a APK after CI passes. Use main Camera2 ID0.
+2. DIRECT photo ZSL in AUTO AE and AUTO focus, 4:3 960x720, software gamma 1.00.
+   Record result ISO/shutter/AE/NR/EDGE and visual darkness vs CameraX.
+3. Without changing lighting, try gamma 0.80, 0.65, 0.50. This changes only
+   output midtones; note noise, banding and highlight clipping separately.
+4. Test manual ISO 400 then 800 @ shutter 20ms, then (opt-in) ISO 1600
+   @ 20ms, compare request and CaptureResult; check whether HAL falls back.
+5. Try exact source 4160x3120 with 4x GPU and see negotiated source size,
+   then 12MP 4000x3000 if advertised; at 4x test 4:3 960x720 and
+   square 768x768.
+6. Test rapid switches Direct ZSL/VIDEO/CameraX, encoder recovery, RTSP/
+   ONVIF/mjpeg and thermal after 15 minutes.
+7. Capture images/clips if gamma 1.00 Direct remains dark with AE ISO2728,
+   because logcat alone cannot prove a missing color transform.
+
+
 ==============================================================================
