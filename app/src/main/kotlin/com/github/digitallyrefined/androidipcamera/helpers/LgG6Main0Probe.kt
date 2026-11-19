@@ -26,6 +26,14 @@ internal object LgG6Main0Probe {
 
     fun isTarget(cameraId: String?) = LgG6Main0Math.isTarget(Build.MODEL, cameraId)
 
+    fun advertisedRequestKey(context: Context, cameraId: String?, name: String): Boolean {
+        if (!isTarget(cameraId)) return false
+        return try {
+            val mgr = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
+            mgr.getCameraCharacteristics("0").availableCaptureRequestKeys.any { it.name == name }
+        } catch (_: Exception) { false }
+    }
+
     fun logAdvertisedKeys(context: Context, cameraId: String?) {
         if (!isTarget(cameraId)) return
         try {
