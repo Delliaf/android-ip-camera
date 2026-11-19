@@ -105,6 +105,11 @@ class CameraXCapture(
     @Volatile private var manualShutterUs: Long? = null
     @Volatile private var preciseFocusDiopters: Float? = null
     @Volatile private var postRawBoostPercent: Int? = null
+    @Volatile private var lg0CropMode: String? = null
+    @Volatile private var lg0CropZoom = 1f
+    @Volatile private var lg0CropX = .5f
+    @Volatile private var lg0CropY = .5f
+    @Volatile private var lg0Peaking = false
     @Volatile private var lastCachedFrameMs = 0L
     private val main = ContextCompat.getMainExecutor(ctx)
     private val analysisExec = Executors.newSingleThreadExecutor()
@@ -455,6 +460,44 @@ class CameraXCapture(
         try {
             val info = Camera2CameraInfo.from(cam.cameraInfo)
             val options = CaptureRequestOptions.Builder()
+            // The LG camera app's DEX applies SCALER_CROP_REGION and an optional
+            // Float com.lge.camera.zoom.ratio key. Both are *experimental* here,
+            // isolated from CameraX cameraControl.setZoomRatio (which must stay 1x).
+            if (lgH872Main0 && lg0CropMode in listOf("sensor", "vendor")) {
+                val manager = ctx.getSystemService(Context.CAMERA_SERVICE) as CameraManager
+                val chars = manager.getCameraCharacteristics("0")
+                val active = chars.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
+                active?.let {
+                    val crop = LgG6Main0Math.sensorCrop(
+                        LgPixelRect(it.left, it.top, it.right, it.bottom),
+                        lg0CropZoom.toDouble(), 16, 9,
+                        lg0CropX.toDouble(), lg0CropY.toDouble()
+                    )
+                    options.setCaptureRequestOption(CaptureRequest.SCALER_CROP_REGION,
+                        android.graphics.Rect(crop.left, crop.top, crop.right, crop.bottom))
+                }
+                val advertised = chars.availableCaptureRequestKeys.map { it.name }.toSet()
+                if (lg0CropMode == "vendor") {
+                    if (LgG6Main0Probe.VENDOR_ZOOM in advertised) {
+                        // Exact Java Float type recovered from LGCameraApp/classes18.dex.
+                        val vendorKey = CaptureRequest.Key(
+                            LgG6Main0Probe.VENDOR_ZOOM, Float::class.javaObjectType)
+                        options.setCaptureRequestOption(vendorKey, lg0CropZoom)
+                    } else Log.w(TAG, "LG vendor zoom not advertised by camera0; standard crop only")
+                }
+            }
+            if (lgH872Main0 && lg0Peaking) {
+                val manager = ctx.getSystemService(Context.CAMERA_SERVICE) as CameraManager
+                val chars = manager.getCameraCharacteristics("0")
+                if (chars.availableCaptureRequestKeys.any {
+                        it.name == LgG6Main0Probe.VENDOR_PEAKING
+                    }) {
+                    // Exact Java Integer type recovered from LGCameraApp/classes18.dex.
+                    val peakingKey = CaptureRequest.Key(
+                        LgG6Main0Probe.VENDOR_PEAKING, Int::class.javaObjectType)
+                    options.setCaptureRequestOption(peakingKey, 1)
+                } else Log.w(TAG, "LG focus peaking tag not advertised by camera0")
+            }
             val maxDiopters = info.getCameraCharacteristic(
                 CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE) ?: 0f
             val focusD = if (lgH872Main0 && preciseFocusDiopters != null) {
@@ -532,6 +575,21 @@ class CameraXCapture(
     override fun setPostRawBoost(percent: Int?) {
         if (!lgH872Main0) return
         postRawBoostPercent = percent?.takeIf { it in 100..3199 }
+        applyAdvancedCaptureRequest()
+    }
+
+    override fun setLg0SensorCrop(mode: String?, zoom: Float, x: Float, y: Float) {
+        if (!lgH872Main0) return
+        lg0CropMode = mode?.takeIf { it == "sensor" || it == "vendor" }
+        lg0CropZoom = zoom.coerceIn(1f, 8f)
+        lg0CropX = x.coerceIn(0f, 1f)
+        lg0CropY = y.coerceIn(0f, 1f)
+        applyAdvancedCaptureRequest()
+    }
+
+    override fun setLg0VendorPeaking(enabled: Boolean) {
+        if (!lgH872Main0) return
+        lg0Peaking = enabled
         applyAdvancedCaptureRequest()
     }
 
