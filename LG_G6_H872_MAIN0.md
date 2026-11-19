@@ -108,3 +108,72 @@ CI exercises Kotlin/Gradle compilation, JVM tests and debug APK packaging.
 focus-peaking overlay behavior or RTSP/ONVIF interoperability on the phone.**
 Those require the physical H872 and real captured evidence. Keep the PR
 draft until the device-side tests succeed.
+
+
+## 2026-11-19: photo-preview ZSL handoff v4 and on-device findings
+
+The user's OEM DEX trace establishes that `CameraOps.setPreviewRequestToMainSession`
+creates a repeating request using `TEMPLATE_ZERO_SHUTTER_LAG` (5) for stock
+PHOTO preview, while recording mode uses `TEMPLATE_RECORD` (3). Stock
+LG applies additional private solution tuning; TEMPLATE_ZSL alone is an
+A/B hypothesis, **not a guarantee of OEM rendering parity**.
+
+**Latest H872 log changes the ISO interpretation.** With AE enabled,
+Camera ID0 `CaptureResult.SENSOR_SENSITIVITY` reached **1381..1484**
+even though manual Camera2 characteristics advertise **ISO 50..800**.
+Manual requested 36 and 3600 were clamped by our previous CameraX
+implementation to 50 and 800. Therefore an opt-in **experimental
+manual >800** switch now submits ISO 801..3200 without a software
+clamp; users must compare actual request ISO and returned result ISO.
+The switch is disabled by default. AUTO >800 is not itself proof that
+manual ISO >800 is accepted, nor that the gain is analog.
+
+**Main0 12/13 MP:** source requests now include 4160×3120 (4:3,
+about 13 MP), 4000×3000 (12MP experimental), 4160×2340 (16:9),
+3840×2160, and 3264×2448 (8MP comparison). The effective
+PRIVATE or CameraX output size may be smaller; the browser readback
+and Android logcat reveal negotiation. A 4160×3120 source cropped
+4× then to 16:9 yields roughly 1040×585 real camera pixels, which
+are appropriate for about 960×540 output, not lossless 1080p.
+
+**Zoom bug fix:** the GL texture crop must match encoded aspect before
+zoom. The original normalized rectangular ROI took 4:3 texture into
+16:9 encoder and letterboxed/cropped inconsistently. The corrected
+`RoiCrop.windowForOutput` explicitly includes the camera source and
+encoder ratios, and the LG GPU pipeline fills the encoder viewport.
+
+**New opt-in capture API** `lg-main0-direct`: single direct
+Camera2 PRIVATE SurfaceTexture -> existing GL GPU crop -> hardware H.264
+-> existing RTSP/ONVIF. Select PHOTO_ZSL(5), VIDEO_REFERENCE(3),
+PHOTO_DEFAULT(1), PHOTO_FAST or PHOTO_HQ in the LG panel to compare the
+same sensor/output/bitrate/FPS/scene. The CameraX option remains the
+default stable fallback. MJPEG, motion detection, still snapshots and
+on-phone Preview intentionally switch back to CameraX, because a
+single-surface direct engine cannot deliver those streams concurrently.
+If Camera2 fails to deliver frames, startup switches to CameraX.
+
+**NR/EDGE:** the LG panel separately offers CameraX OFF / FAST / HQ
+for standard ISP noise reduction and sharpening keys. NR high-quality
+can reduce FPS and may not operate on large streams; always read back
+actual NR/EDGE and inspect fine-text detail/halos, not just visual contrast.
+
+**ARM64:** native Rust OpenTunnel is built only for aarch64 and release
+splits only produce arm64-v8a. CI inspects the debug APK's `lib/`
+entries and rejects a different ABI. An existing installed APK signed
+with another key cannot necessarily be upgraded in-place.
+
+### Controlled first experiment
+
+Use fixed focus, fixed shutter, stable lighting and a tripod. In
+H264 mode (NOT MJPEG), set Camera0, 960×540 encoded output, 15fps,
+~2Mbps. Choose the **Direct Camera2** engine and switch between
+**VIDEO_REFERENCE (template3)** and **PHOTO_ZSL (template5)**.
+Compare actual frame detail and noise at equal framing. For the next
+test, set source to 4160×3120 and choose **GPU 4×** and compare it
+with **ISP 4×**, keeping encoder output the same.
+
+Windows read-only root-assisted diagnostic collector:
+`scripts/lg-g6-main0-windows-diagnostics.ps1`; run from PowerShell
+with ADB connected and stream already started. Inspect the resulting
+ZIP for private device/network information before sharing. A/B on the
+real H872 and thermal stability are still required even when CI is green.
