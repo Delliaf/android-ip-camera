@@ -1527,6 +1527,7 @@ class StreamingServerHelper(
         val lgTelemetry: Boolean,
         val lgProcessing: String,
         val lgPreviewProfile: String,
+        val lgDirectGamma: String,
         val lgExtendedIso: Boolean,
     )
 
@@ -1641,6 +1642,7 @@ class StreamingServerHelper(
                 put("lgTelemetry", settings.lgTelemetry)
                 put("lgProcessing", settings.lgProcessing)
                 put("lgPreviewProfile", settings.lgPreviewProfile)
+                put("lgDirectGamma", settings.lgDirectGamma)
                 put("lgExtendedIso", settings.lgExtendedIso)
                 put("lgCaptureResult", if (settings.lgTelemetry &&
                     android.os.SystemClock.elapsedRealtime() - LgG6Main0Telemetry.lastUpdatedMs < 5000L)
@@ -1837,6 +1839,7 @@ class StreamingServerHelper(
             lgTelemetry = prefs.getBoolean(LgG6Main0Profile.PREF_TELEMETRY, false),
             lgProcessing = prefs.getString("lg_main0_processing", "off") ?: "off",
             lgPreviewProfile = prefs.getString("lg_main0_preview_profile", "zsl") ?: "zsl",
+            lgDirectGamma = prefs.getString("lg_main0_direct_gamma", "0.80") ?: "0.80",
             lgExtendedIso = prefs.getBoolean(LgG6Main0Profile.PREF_EXTENDED_ISO, false),
         )
     }
