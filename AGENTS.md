@@ -5,7 +5,7 @@ It is the persistent technical handoff and changelog for this project and should
 remain usable if this conversation or tool session is no longer available.
 
 For every significant code or CI change:
-1. Inspect the current `feature/manual-camera-4k-stream` head and PR #1.
+1. Inspect the current `feature/manual-camera-4k-stream` head and PR #1 **plus this follow-up branch `fix/onvif-go2rtc-telemetry` / PR #3**. Do not overwrite either branch or the separate historical PR #2.
 2. Consult recent actual GitHub Actions logs and recorded LG-H872 test results.
 3. Keep changes LG-H872 Camera2 main ID0 guarded; leave RTSP/ONVIF intact.
 4. Produce **only arm64-v8a native APKs**; avoid 32-bit Rust/NDK targets.
@@ -18,3 +18,5 @@ For every significant code or CI change:
 8. Do not merge draft PR #1 until user validates results on physical LG G6.
 
 Other documentation: [LG_G6_H872_MAIN0.md](LG_G6_H872_MAIN0.md).
+
+Additional follow-up: [GO2RTC_ONVIF_AND_METRICS.md](GO2RTC_ONVIF_AND_METRICS.md) explains why go2rtc ONVIF over HTTP reset when server TLS was enabled, the new independent ONVIF TLS toggle, CPU/temperature metrics and remaining hardware smoke tests. The successful Android 8 ARM64 build is recorded in DEVELOPMENT_HISTORY.txt (GitHub Actions run 44554725993).
