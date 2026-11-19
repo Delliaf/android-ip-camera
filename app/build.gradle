@@ -23,8 +23,8 @@ android {
         targetSdk 34
         // The release split is arm64-only; Rust builds only aarch64 native code.
         // Do NOT also set ndk.abiFilters: AGP rejects overlapping ABI splits.
-        versionCode 186
-        versionName "0.18.0-delliaf.6"
+        versionCode 187
+        versionName "0.18.0-delliaf.7"
 
         // https://f-droid.org/docs/Reproducible_Builds/#pngs-generated-from-vector-drawables
         vectorDrawables.generatedDensities = []
