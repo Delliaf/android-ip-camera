@@ -53,6 +53,17 @@ internal class LgG6Main0Telemetry : CameraCaptureSession.CaptureCallback() {
             private set
         @Volatile var lastUpdatedMs = 0L
             private set
+        fun report(request: CaptureRequest, result: TotalCaptureResult, profile: String = "CameraX") {
+            val summary = "profile=$profile " +
+                LgG6PhotoPreviewTuning.readback(result) +
+                " requestISO=" + request.get(CaptureRequest.SENSOR_SENSITIVITY) +
+                " requestShutterNs=" + request.get(CaptureRequest.SENSOR_EXPOSURE_TIME) +
+                " requestCrop=" + request.get(CaptureRequest.SCALER_CROP_REGION) +
+                " postRawBoost=" + result.get(CaptureResult.CONTROL_POST_RAW_SENSITIVITY_BOOST)
+            lastSummary = summary
+            lastUpdatedMs = SystemClock.elapsedRealtime()
+            Log.i("LGG6Camera0Result", summary)
+        }
     }
     private var frames = 0
     override fun onCaptureCompleted(
@@ -60,15 +71,6 @@ internal class LgG6Main0Telemetry : CameraCaptureSession.CaptureCallback() {
     ) {
         frames++
         if (frames % 30 != 0) return
-        val summary = "ISO=" + result.get(CaptureResult.SENSOR_SENSITIVITY) +
-            " shutterNs=" + result.get(CaptureResult.SENSOR_EXPOSURE_TIME) +
-            " frameNs=" + result.get(CaptureResult.SENSOR_FRAME_DURATION) +
-            " focusD=" + result.get(CaptureResult.LENS_FOCUS_DISTANCE) +
-            " crop=" + result.get(CaptureResult.SCALER_CROP_REGION) +
-            " requestCrop=" + request.get(CaptureRequest.SCALER_CROP_REGION) +
-            " postRawBoost=" + result.get(CaptureResult.CONTROL_POST_RAW_SENSITIVITY_BOOST)
-        lastSummary = summary
-        lastUpdatedMs = SystemClock.elapsedRealtime()
-        Log.i("LGG6Camera0Result", summary)
+        report(request, result)
     }
 }
