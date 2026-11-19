@@ -1198,6 +1198,17 @@ class StreamingService : LifecycleService() {
     private fun lgMain0Zoom(p: SharedPreferences): Float =
         (p.getString(LgG6Main0Profile.PREF_ZOOM, "4.0")?.toFloatOrNull() ?: 4f).coerceIn(1f, 8f)
 
+    /**
+     * Camera0 default now preserves 4:3 photo sensor geometry, not 16:9.
+     * 960x720 uses 1040x780 source pixels at 4x from 4160x3120.
+     * 768x768 square uses a centered 780x780 crop at the same zoom.
+     */
+    private fun lgMain0OutputSize(shape: String?): String = when (shape) {
+        "1:1" -> "768x768"
+        "16:9" -> "960x540"
+        else -> "960x720"
+    }
+
     private fun applyRoiToPipes() {
         val (originalZoom, x, y) = roiConfig()
         val p = PreferenceManager.getDefaultSharedPreferences(this)
@@ -2341,12 +2352,22 @@ class StreamingService : LifecycleService() {
                     .putString(LgG6Main0Profile.PREF_ZOOM_MODE,
                         if (value == "gpu4") "gpu" else "isp")
                     .putString(LgG6Main0Profile.PREF_ZOOM, if (value == "safe") "1.0" else "4.0")
-                    .putString("stream_res", "960x540")
+                    .putString("stream_res", lgMain0OutputSize(
+                        prefs.getString("lg_main0_output_shape", "4:3")))
                     .putString("capture_resolution", if (value == "gpu4") "4160x3120" else "match")
                     .putString("stream_fps", "15")
                     .putString("stream_bitrate_kbps", "2000")
                     .putString("mjpeg_quality", "90")
                 edit.apply()
+                if (localRecorder?.isRecording != true) debouncedStartCamera()
+            }
+            "lg_main0_output_shape" -> {
+                if (!LgG6Main0Profile.isTarget(id)) return
+                if (value !in listOf("4:3", "1:1", "16:9")) return
+                prefs.edit()
+                    .putString("lg_main0_output_shape", value)
+                    .putString("stream_res", lgMain0OutputSize(value))
+                    .apply()
                 if (localRecorder?.isRecording != true) debouncedStartCamera()
             }
             "lg_main0_zoom_mode", "lg_main0_zoom", "lg_main0_focus_mode",
