@@ -1800,6 +1800,8 @@ class StreamingService : LifecycleService() {
             b.setLgPostRawBoost(p.getString(LgG6Main0Profile.PREF_POST_RAW_BOOST, "100")
                 ?.toIntOrNull()?.takeIf { it > 100 })
             b.setLgFocusPeaking(p.getBoolean(LgG6Main0Profile.PREF_PEAKING, false))
+            b.setLgPhotoProcessing(p.getString("lg_main0_processing", "off") ?: "off")
+            b.setLgPreviewProfile(p.getString("lg_main0_preview_profile", "zsl") ?: "zsl")
             applyRoiToPipes()
         } else zoom?.toFloatOrNull()?.let { b.setZoom(it) }
 
@@ -2275,9 +2277,12 @@ class StreamingService : LifecycleService() {
             }
             "lg_main0_zoom_mode", "lg_main0_zoom", "lg_main0_focus_mode",
             "lg_main0_focus_diopters", "lg_main0_postraw_boost", "lg_main0_peaking",
-            "lg_main0_telemetry" -> {
+            "lg_main0_telemetry", "lg_main0_processing", "lg_main0_preview_profile" -> {
                 if (!LgG6Main0Profile.isTarget(id)) return
                 val saved = when (key) {
+                    "lg_main0_processing" -> value.takeIf { it in listOf("off", "fast", "hq") } ?: return
+                    "lg_main0_preview_profile" -> value.takeIf {
+                        it in listOf("zsl", "video", "default", "fast", "hq") } ?: return
                     "lg_main0_zoom_mode" -> value.takeIf { it in listOf("isp", "gpu", "vendor") } ?: return
                     "lg_main0_zoom" -> value.toFloatOrNull()?.takeIf { it.isFinite() && it in 1f..8f }
                         ?.toString() ?: return
