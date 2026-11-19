@@ -103,6 +103,12 @@ class CameraXCapture(
     @Volatile private var manualFocus: Float? = null
     @Volatile private var manualIso: Int? = null
     @Volatile private var manualShutterUs: Long? = null
+    @Volatile private var preciseFocusDiopters: Float? = null
+    @Volatile private var lgVendorZoom: Float? = null
+    @Volatile private var lgPostRawBoost: Int? = null
+    @Volatile private var lgFocusPeaking = false
+    private val isLgMain0: Boolean get() = LgG6Main0Profile.isTarget(logicalCameraId)
+    @Volatile private var lastNv21CachedAtMs = 0L
     private val main = ContextCompat.getMainExecutor(ctx)
     private val analysisExec = Executors.newSingleThreadExecutor()
 
@@ -146,6 +152,13 @@ class CameraXCapture(
                     .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888)
                 val analysisInterop = Camera2Interop.Extender(aBuilder)
                 physicalCameraId?.let { analysisInterop.setPhysicalCameraId(it) }
+                if (isLgMain0 && androidx.preference.PreferenceManager
+                        .getDefaultSharedPreferences(ctx)
+                        .getBoolean(LgG6Main0Profile.PREF_TELEMETRY, false)) {
+                    // Attach once to ImageAnalysis only, not to every Preview surface.
+                    LgG6Main0VendorProbe.scan(ctx)
+                    analysisInterop.setSessionCaptureCallback(LgG6Main0Telemetry())
+                }
                 // Some legacy HALs (e.g. this phone's rear cam) stall the analysis stream unless an AE
                 // target FPS range is set. Use the WIDEST advertised range, not a fixed lock — AE stays
                 // fully auto (drops low for light in the dark, up to 30 in good light).
@@ -158,20 +171,26 @@ class CameraXCapture(
                         width = img.width; height = img.height
                         hasProducedFrame = true
                         lastFrameAtMs = SystemClock.elapsedRealtime()
-                        try {
-                            val crop = img.cropRect
-                            val nv21 = synchronized(nv21Lock) {
-                                convertYUV420toNV21(img, nv21Buffer, nv21RowBuffer).also {
-                                    nv21Buffer = it
+                        // A GPU-surface stream must not convert full-resolution YUV to
+                        // NV21 on EVERY frame solely to keep a rarely used snapshot backup.
+                        // Keep a recent fallback frame, sampled at most once per 1.5s.
+                        val cacheNow = SystemClock.elapsedRealtime()
+                        if (cacheNow - lastNv21CachedAtMs >= 1500L) {
+                            try {
+                                synchronized(nv21Lock) {
+                                    val crop = img.cropRect
+                                    val nv21 = convertYUV420toNV21(img, nv21Buffer, nv21RowBuffer)
+                                    nv21Buffer = nv21
                                     if (nv21RowBuffer == null || nv21RowBuffer!!.size < img.planes[0].rowStride) {
                                         nv21RowBuffer = ByteArray(img.planes[0].rowStride)
                                     }
+                                    latestNv21 = nv21
+                                    latestNv21W = crop.width(); latestNv21H = crop.height()
+                                    latestNv21AtMs = System.currentTimeMillis()
+                                    lastNv21CachedAtMs = cacheNow
                                 }
-                            }
-                            latestNv21 = nv21
-                            latestNv21W = crop.width(); latestNv21H = crop.height()
-                            latestNv21AtMs = System.currentTimeMillis()
-                        } catch (e: Exception) { Log.e(TAG, "frame cache: ${e.message}") }
+                            } catch (e: Exception) { Log.e(TAG, "frame cache: ${e.message}") }
+                        }
                         onFrame(img)
                     } }
                 // ImageCapture stays co-bound from start(): a still then snaps straight from the bound
@@ -430,8 +449,8 @@ class CameraXCapture(
     }
 
     /**
-     * One Camera2 request-options owner for AF + sensor exposure. Never clear/rewrite
-     * one control in isolation: doing so previously reset the other control.
+     * One request owner for AF, manual sensor and guarded LG ID0 OEM features.
+     * Do not call clearCaptureRequestOptions() from focus/zoom: it would erase AE.
      */
     @OptIn(ExperimentalCamera2Interop::class)
     private fun applyAdvancedCaptureRequest() {
@@ -439,56 +458,116 @@ class CameraXCapture(
         try {
             val info = Camera2CameraInfo.from(cam.cameraInfo)
             val options = CaptureRequestOptions.Builder()
-            manualFocus?.let { norm ->
-                val maxDiopters = info.getCameraCharacteristic(
-                    CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE) ?: 0f
-                options.setCaptureRequestOption(
-                    CaptureRequest.CONTROL_AF_MODE, CameraMetadata.CONTROL_AF_MODE_OFF)
-                options.setCaptureRequestOption(
-                    CaptureRequest.LENS_FOCUS_DISTANCE, norm * maxDiopters)
+            val minFocusD = info.getCameraCharacteristic(
+                CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE) ?: 0f
+            val focusD = preciseFocusDiopters ?: manualFocus?.let { it * minFocusD }
+            if (focusD != null && minFocusD > 0f) {
+                options.setCaptureRequestOption(CaptureRequest.CONTROL_AF_MODE, CameraMetadata.CONTROL_AF_MODE_OFF)
+                options.setCaptureRequestOption(CaptureRequest.LENS_FOCUS_DISTANCE,
+                    focusD.coerceIn(0f, minFocusD))
             }
             val iso = manualIso
             val shutterUs = manualShutterUs
             if (iso != null && shutterUs != null) {
-                val capabilities = info.getCameraCharacteristic(
-                    CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES)
-                if (capabilities?.contains(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_MANUAL_SENSOR) == true) {
-                    val isoRange = info.getCameraCharacteristic(
-                        CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)
-                    val shutterRange = info.getCameraCharacteristic(
-                        CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)
-                    val shutterNs = shutterUs.coerceIn(1L, 1_000_000L) * 1000L
+                val caps = info.getCameraCharacteristic(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES)
+                val isoRange = info.getCameraCharacteristic(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)
+                val expRange = info.getCameraCharacteristic(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)
+                if (caps?.contains(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_MANUAL_SENSOR) == true
+                    && isoRange != null && expRange != null) {
+                    // LG camera0 advertises ISO 50..800. Values above 800 are NOT
+                    // authenticated by legacy Camera1 ID3's lg-iso-values string.
+                    val actualIso = iso.coerceIn(isoRange.lower, isoRange.upper)
+                    val desiredNs = shutterUs.coerceIn(1L, 1_000_000L) * 1000L
+                    val actualNs = desiredNs.coerceIn(expRange.lower, expRange.upper)
                     options.setCaptureRequestOption(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
-                    options.setCaptureRequestOption(
-                        CaptureRequest.SENSOR_SENSITIVITY,
-                        isoRange?.let { iso.coerceIn(it.lower, it.upper) } ?: iso)
-                    options.setCaptureRequestOption(
-                        CaptureRequest.SENSOR_EXPOSURE_TIME,
-                        shutterRange?.let { shutterNs.coerceIn(it.lower, it.upper) } ?: shutterNs)
-                } else {
-                    Log.w(TAG, "Manual sensor exposure unavailable for selected Camera2 camera")
+                    options.setCaptureRequestOption(CaptureRequest.SENSOR_SENSITIVITY, actualIso)
+                    options.setCaptureRequestOption(CaptureRequest.SENSOR_EXPOSURE_TIME, actualNs)
+                    if (isLgMain0) {
+                        val fps = androidx.preference.PreferenceManager.getDefaultSharedPreferences(ctx)
+                            .getString("stream_fps", "20")?.toIntOrNull()?.coerceIn(1, 60) ?: 20
+                        // Preserve the requested shutter by reducing effective FPS when
+                        // it is longer than nominal frame time. Never silently cut exposure.
+                        val frameNs = maxOf(1_000_000_000L / fps, actualNs + 1_000_000L)
+                        options.setCaptureRequestOption(CaptureRequest.SENSOR_FRAME_DURATION, frameNs)
+                        val boost = lgPostRawBoost
+                        val boostRange = info.getCameraCharacteristic(
+                            CameraCharacteristics.CONTROL_POST_RAW_SENSITIVITY_BOOST_RANGE)
+                        if (boost != null && boostRange != null)
+                            options.setCaptureRequestOption(
+                                CaptureRequest.CONTROL_POST_RAW_SENSITIVITY_BOOST,
+                                boost.coerceIn(boostRange.lower, boostRange.upper))
+                        if (actualIso != iso) Log.i(TAG, "LG0 ISO clamped $iso to $actualIso (Camera2 range)")
+                    }
+                } else Log.w(TAG, "Manual sensor controls unavailable for Camera2 ID=${logicalCameraId}")
+            }
+            if (isLgMain0) {
+                val vendorKeys = LgG6Main0VendorProbe.capabilities(ctx)
+                if (lgFocusPeaking && LgG6Main0Profile.VENDOR_PEAKING in vendorKeys) {
+                    try {
+                        options.setCaptureRequestOption(
+                            CaptureRequest.Key(LgG6Main0Profile.VENDOR_PEAKING, Int::class.javaObjectType), 1)
+                    } catch (e: Exception) { Log.w(TAG, "LG peaking rejected: ${e.message}") }
+                }
+                lgVendorZoom?.let { z ->
+                    if (LgG6Main0Profile.VENDOR_ZOOM in vendorKeys) {
+                        try {
+                            val active = info.getCameraCharacteristic(
+                                CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
+                            if (active != null) {
+                                val crop = LgG6Main0Math.sensorCrop(
+                                    LgPixelRect(active.left, active.top, active.right, active.bottom),
+                                    z.toDouble())
+                                options.setCaptureRequestOption(CaptureRequest.SCALER_CROP_REGION,
+                                    android.graphics.Rect(crop.left, crop.top, crop.right, crop.bottom))
+                            }
+                            options.setCaptureRequestOption(
+                                CaptureRequest.Key(LgG6Main0Profile.VENDOR_ZOOM, Float::class.javaObjectType), z)
+                        } catch (e: Exception) { Log.w(TAG, "LG vendor zoom rejected: ${e.message}") }
+                    } else Log.w(TAG, "LG vendor zoom not advertised on Camera ID0; disabled")
                 }
             }
             Camera2CameraControl.from(cam.cameraControl).captureRequestOptions = options.build()
-        } catch (e: Exception) {
-            Log.e(TAG, "Camera2 manual settings: ${e.message}", e)
-        }
+        } catch (e: Exception) { Log.e(TAG, "Camera2 manual settings: ${e.message}", e) }
     }
 
-    @OptIn(ExperimentalCamera2Interop::class)
     override fun setManualFocus(distance: Float) {
+        preciseFocusDiopters = null
         manualFocus = distance.takeIf { it >= 0f }?.coerceIn(0f, 1f)
         applyAdvancedCaptureRequest()
     }
 
+    override fun setFocusDiopters(diopters: Float?) {
+        if (!isLgMain0) return
+        manualFocus = null
+        preciseFocusDiopters = diopters?.takeIf { it.isFinite() }?.coerceIn(0f, 10f)
+        applyAdvancedCaptureRequest()
+    }
+
     override fun setManualExposure(iso: Int?, shutterUs: Long?) {
-        // Treat mode switch as atomic: a half-updated manual exposure is not valid.
         manualIso = if (iso != null && shutterUs != null) iso.coerceIn(25, 204800) else null
         manualShutterUs = if (iso != null && shutterUs != null) shutterUs.coerceIn(1L, 1_000_000L) else null
         applyAdvancedCaptureRequest()
         if (manualIso == null) exposureIndex?.let {
             try { camera?.cameraControl?.setExposureCompensationIndex(it) } catch (_: Exception) {}
         }
+    }
+
+    override fun setLgVendorZoom(zoom: Float?) {
+        if (!isLgMain0) return
+        lgVendorZoom = zoom?.takeIf { it.isFinite() }?.coerceIn(1f, 8f)
+        applyAdvancedCaptureRequest()
+    }
+
+    override fun setLgPostRawBoost(percent: Int?) {
+        if (!isLgMain0) return
+        lgPostRawBoost = percent?.coerceIn(100, 400)
+        applyAdvancedCaptureRequest()
+    }
+
+    override fun setLgFocusPeaking(enabled: Boolean) {
+        if (!isLgMain0) return
+        lgFocusPeaking = enabled
+        applyAdvancedCaptureRequest()
     }
 
     /** The camera's WIDEST advertised AE FPS range — leaves auto-exposure fully free while giving legacy
