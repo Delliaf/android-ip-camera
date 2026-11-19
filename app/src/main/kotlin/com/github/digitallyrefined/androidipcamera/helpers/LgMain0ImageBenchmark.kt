@@ -427,18 +427,38 @@ internal class LgMain0ImageBenchmark(private val context: Context) {
                 put("imageSource", if (chosen.width > 0) "${chosen.width}x${chosen.height}" else "unavailable")
                 put("cases", rows)
             }.toString(2).toByteArray(Charsets.UTF_8))
-            val csv = StringBuilder("index,id,status,pipeline,template,width,height,error\n")
+            val csv = StringBuilder(
+                "index,id,status,pipeline,template,width,height,isoActual,shutterNsActual," +
+                "focusDiopters,NRActual,EDGEActual,meanLuma,contrastStdDev,p01,p99," +
+                "blackClippingPct,whiteClippingPct,edgeEnergy,laplacianVariance," +
+                "temporalLumaAbsDiff,timestampMatched,error\\n")
             for (i in 0 until rows.length()) {
                 val o = rows.getJSONObject(i)
-                fun csvField(value: String): String = "\""+value.replace("\"", "\"\"")+"\""
-                csv.append(o.optInt("index")).append(',')
-                    .append(csvField(o.optString("id"))).append(',')
-                    .append(csvField(o.optString("status"))).append(',')
-                    .append(csvField(o.optString("pipeline"))).append(',')
-                    .append(o.optInt("template")).append(',')
-                    .append(o.optInt("width")).append(',')
-                    .append(o.optInt("height")).append(',')
-                    .append(csvField(o.optString("error"))).append('\n')
+                val m = o.optJSONObject("imageMetrics")
+                val actual = o.optJSONObject("captureResult")
+                fun csvField(value: String): String = "\\\"" + value.replace("\\\"", "\\\"\\\"") + "\\\""
+                val cells = listOf(
+                    o.optInt("index").toString(), csvField(o.optString("id")),
+                    csvField(o.optString("status")), csvField(o.optString("pipeline")),
+                    o.optInt("template").toString(), o.optInt("width").toString(),
+                    o.optInt("height").toString(), actual?.optString("sensorIso").orEmpty(),
+                    actual?.optString("shutterNs").orEmpty(),
+                    actual?.optString("focusDiopters").orEmpty(),
+                    actual?.optString("noiseReduction").orEmpty(),
+                    actual?.optString("edgeMode").orEmpty(),
+                    m?.optString("meanLuma").orEmpty(),
+                    m?.optString("lumaStdDev").orEmpty(),
+                    m?.optString("lumaP01").orEmpty(),
+                    m?.optString("lumaP99").orEmpty(),
+                    m?.optString("blackClippingPct").orEmpty(),
+                    m?.optString("whiteClippingPct").orEmpty(),
+                    m?.optString("edgeEnergy").orEmpty(),
+                    m?.optString("laplacianVariance").orEmpty(),
+                    m?.optString("temporalLumaAbsDiff").orEmpty(),
+                    o.optBoolean("captureResultTimestampMatched").toString(),
+                    csvField(o.optString("error"))
+                )
+                csv.append(cells.joinToString(",")).append('\\n')
             }
             write("results.csv", csv.toString().toByteArray(Charsets.UTF_8))
             write("README.txt", (
