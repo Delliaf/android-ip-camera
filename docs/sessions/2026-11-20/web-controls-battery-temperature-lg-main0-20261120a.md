@@ -62,3 +62,20 @@
 3. Проверить `/metrics.json`: одновременно числовые `temperatureCelsius` (CPU/SoC) и `batteryTemperatureCelsius`; правильные подписи, не подменять SoC батареей.
 4. Regression: StreamingService restart, Camera0 benchmark, RTSP/ONVIF go2rtc, снижение FPS и температурные лимиты.
 5. Нельзя публиковать приватный ZIP/кадры в public GitHub.
+
+
+### 2026-11-20 — CI для версии 0.18.0-delliaf.9 УСПЕШЕН
+
+**Точно проверенный функциональный SHA:** `9f7c24508e8210ce7b4e38d499924429639a9b57`.
+
+**GitHub Actions run:** https://github.com/Delliaf/android-ip-camera/actions/runs/44623993393
+- Статус: `completed`, conclusion `success`.
+- `Validate embedded browser JavaScript`: SUCCESS; включая `node scripts/test-metrics-dashboard.cjs` (SoC + отдельная батарея) и `node scripts/test-web-controls.cjs` (POST и JSON подтверждение, ошибка при HTML/401).
+- `Test and build debug APK`: SUCCESS; JVM unit tests и `:app:assembleDebug` включая `WebControlRouteTest`, `BatteryTemperatureMath`.
+- `Verify APK contains only arm64-v8a JNI libraries`: SUCCESS.
+- `Upload installable debug APK`: SUCCESS.
+- Artifact: `android-ip-camera-android8-debug`, artifact ID **14578982845**, ZIP 11,251,542 байт, внутри APK `0.18.0-delliaf.9`.
+- **Физически не проверено на LG H872**: пользователь должен установить APK и испытать кнопки фокусировки/zoom/экспозиции, проверить реальный `CaptureResult`, `/metrics.json` и `🌡️ АКБ`.
+- Запуск #44623985932 завершился `cancelled` по concurrency после более свежего коммита, это не ошибка кода.
+
+При продолжении из нового чата брать код `fix/web-controls-battery-temp-20261120`, draft PR #6; не переиспользовать старый отладочный APK .8 как новую сборку. Дальше: hardware feedback от пользователя, при необходимости правки нового коммита/новая CI.
