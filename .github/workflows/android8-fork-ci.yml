@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feature/manual-camera-4k-stream
+      - feature/lg-h872-main0
   pull_request:
     branches:
       - main
