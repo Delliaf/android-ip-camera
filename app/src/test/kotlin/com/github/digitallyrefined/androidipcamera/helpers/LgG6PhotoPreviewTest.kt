@@ -4,7 +4,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** 13MP H872 4:3 input mapped onto a 16:9 encoded stream. */
+/** H872 4:3 full-sensor input with native 4:3, square and optional 16:9 outputs. */
 class LgG6PhotoPreviewTest {
     @Test fun oemDexTemplateIds() {
         assertEquals(5, LgG6PhotoPreviewTuning.template(LgG6PreviewProfile.PHOTO_ZSL))
@@ -17,6 +17,41 @@ class LgG6PhotoPreviewTest {
         assertEquals(LgG6PreviewProfile.PHOTO_ZSL, LgG6PreviewProfile.parse("not-a-profile"))
         assertEquals(LgG6PreviewProfile.VIDEO_REFERENCE, LgG6PreviewProfile.parse("video"))
     }
+    @Test fun nativeFourByThreeAtOneXKeepsEverySourcePixel() {
+        val roi = RoiCrop.windowForOutput(1f, .5f, .5f, 4160, 3120, 960, 720)
+        assertEquals(0f, roi.left, .00001f)
+        assertEquals(0f, roi.top, .00001f)
+        assertEquals(1f, roi.width, .00001f)
+        assertEquals(1f, roi.height, .00001f)
+    }
+
+    @Test fun nativeFourByThreeAtFourXPreservesAllNativeCropPixels() {
+        val roi = RoiCrop.windowForOutput(4f, .5f, .5f, 4160, 3120, 960, 720)
+        assertEquals(.375f, roi.left, .00001f)
+        assertEquals(.375f, roi.top, .00001f)
+        assertEquals(1040f, roi.width * 4160f, .01f)
+        assertEquals(780f, roi.height * 3120f, .01f)
+        assertEquals(4f / 3f,
+            (roi.width * 4160f) / (roi.height * 3120f), .00001f)
+    }
+
+    @Test fun squareAtFourXUsesNative780SquareWithoutUpscaling() {
+        val roi = RoiCrop.windowForOutput(4f, .5f, .5f, 4160, 3120, 768, 768)
+        assertEquals(.40625f, roi.left, .00001f)
+        assertEquals(.375f, roi.top, .00001f)
+        assertEquals(780f, roi.width * 4160f, .01f)
+        assertEquals(780f, roi.height * 3120f, .01f)
+    }
+
+    @Test fun squarePanStaysInsideSensorEvenAtEdges() {
+        for (x in listOf(0f, 1f)) for (y in listOf(0f, 1f)) {
+            val r = RoiCrop.windowForOutput(4f, x, y, 4160, 3120, 768, 768)
+            assertTrue(r.left >= 0f && r.top >= 0f)
+            assertTrue(r.left + r.width <= 1.00001f)
+            assertTrue(r.top + r.height <= 1.00001f)
+        }
+    }
+
     @Test fun full13MpSourceIsCroppedTo16By9BeforeZoom() {
         val roi = RoiCrop.windowForOutput(4f, 0.5f, 0.5f, 4160, 3120, 960, 540)
         assertEquals(.25f, roi.width, .00001f)
