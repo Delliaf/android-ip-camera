@@ -1,0 +1,782 @@
+ARCHIVED DEVELOPMENT HISTORY — original experimental branch snapshot
+=======================================================================
+Source: fix/lg-g6-metrics-visible/DEVELOPMENT_HISTORY.txt
+Captured: 2026-11-20 for future independent chats.
+IMPORTANT: IMMUTABLE historical snapshot. This may contain dated hypotheses,
+old CI runs and obsolete branch names. Check live GitHub HEADs and source files.
+Do NOT append here; write NEW entries under main/docs/sessions/YYYY-MM-DD/.
+No camera photos, proprietary system APK/SO or new diagnostic logs attached.
+=======================================================================
+
+LG G6 H872 / android-ip-camera — DEVELOPMENT HISTORY AND HANDOFF
+==============================================================================
+Persistent, plain-text engineering journal. Update in the SAME Git commit as
+each substantive feature, bug fix, CI configuration change, or hardware result.
+Primary purpose: allow another engineer/AI agent to resume WITHOUT chat logs.
+
+REPO AND STATE (2026-11-19)
+---------------------------
+Repository: https://github.com/Delliaf/android-ip-camera
+Work branch: feature/manual-camera-4k-stream
+PR: https://github.com/Delliaf/android-ip-camera/pull/1 (DRAFT; DO NOT MERGE)
+Main branch: intentionally unchanged by experimental Camera0 work.
+Upstream base: DigitallyRefined/android-ip-camera v0.18.0.
+Target hardware: rooted LG G6 LG-H872, Android 8, rear MAIN Camera2 ID "0".
+DO NOT confuse Main ID0 with wide-angle, Camera1 legacy ID3, or physical ID aliases.
+APK/native output requirement: ONLY ARM64-V8A; ARMv7 and universal release forbidden.
+Existing project stack: Kotlin/CameraX/Camera2, GLES SurfaceTexture pipeline,
+hardware H.264, MJPEG, RTSP/RTCP and ONVIF, OpenTunnel Rust/JNI.
+
+MOST RECENT VERIFIED BUILD BEFORE THIS HANDOFF:
+  Commit 55b243cc9f04ab688df34e150c73d4af01d08ea3
+  Debug tests + APK success:
+    https://github.com/Delliaf/android-ip-camera/actions/runs/44529567261
+  Two unsigned ARM64 release APK builds / reproducible compare success:
+    https://github.com/Delliaf/android-ip-camera/actions/runs/44529578809
+  ANOTHER duplicate debug run for the SAME COMMIT FAILED:
+    https://github.com/Delliaf/android-ip-camera/actions/runs/44529577864
+  That failed run showed download/resolution errors across Google Maven/Maven
+  Central ("Could not find" many unrelated dependencies). This was NOT a
+  camera/Kotlin compile failure, as an overlapping run passed for same SHA.
+  Earlier failure at 5029e82b: Kotlin test method name began with "12Mp";
+  fixed in 55b243cc. Earlier ARM64-only build failure: AGP rejects simultaneous
+  ndk.abiFilters and release splits; removed ndk.abiFilters, release splits only.
+  NOT all duplicate CI runs were green; check actual SHA and each job before
+  declaring a new artifact tested.
+
+REQUIREMENTS / USER FEEDBACK
+----------------------------
+- Main Camera0 only. User has ROOT if it genuinely helps, but root-invasive
+  camera HAL/SELinux hacks are NOT allowed by default (risk camera service).
+- Better image quality, especially OEM PHOTO preview over standard 4K VIDEO.
+- Manual ISO and shutter as responsive sliders; focus in diopters.
+- GPU ROI 4x already worked at 4K in real device tests; earlier high-res
+  12MP zoom Main0 did not work correctly.
+- ISP zoom 4x on CameraX 12MP is sharp but appeared to have no denoising.
+- Need try full photo modes ~4000x3000 and 4160x3120; 3264x2448/8MP may be
+  insufficient; request is NOT proof that CameraX delivers that resolution.
+- NEW USER REQUIREMENT 2026-11-19: ***16:9 IS NOT REQUIRED***.
+  4:3 or 1:1 output is acceptable/preferred; DO NOT force the 4:3 full-sensor
+  capture into 16:9. Pick default 4:3/960x720 for main0 4x experiments and
+  offer 1:1/768x768. Geometry must derive from ACTUAL requested output aspect.
+
+PROVEN CAMERA/HAL INFORMATION
+----------------------------
+- Camera2 main ID0 activeArray Rect(8,8,4160,3120), nominal 4152x3112.
+- Camera0 advertised Camera2 manual ISO 50..800, LENS_MIN_FOCUS 10 diopters,
+  MANUAL_SENSOR, max digital zoom 8x, CENTER_ONLY hardware crop.
+- Camera1 legacy ID3 lg-iso-values includes 3200. DOES NOT automatically
+  apply to Camera2 main ID0.
+- **REAL DEVICE RESULT 2026-11-19:** Camera2 AE CaptureResult reports ISO
+  1381..1484 with shutter 41666668ns, frame 41771884ns (~23.9fps),
+  crop Rect(1560,1170-2600,1950), postRawBoost=100, focusD~4.8.
+  This means AUTO can report >800; cannot conclude manual ISO>800 works.
+  Previously manual ISO36 clamped50 and ISO3600 clamped800 in OUR APP.
+  Our experimental extended ISO switch sends up to 3200 only when opted in;
+  compare requested and ACTUAL results in CaptureResult, possibly HAL rejects.
+- LG vendor zoom and focus_peaking keys were found in stock DEX, but device
+  availableCaptureRequestKeys for Camera0 returned FALSE for both. Vendor
+  direct toggles are guarded and may remain unavailable for third-party UID.
+- Stock LG photo preview uses Camera2 createCaptureRequest(
+  TEMPLATE_ZERO_SHUTTER_LAG=5), video mode TEMPLATE_RECORD=3. DEX evidence
+  does not guarantee equivalent OEM image pipeline with template alone.
+  User provided archived library analysis and PHOTO/ZSL handoff. No closed
+  proprietary APK/SO files should be committed to public repo.
+
+IMPLEMENTED EXPERIMENTS ON THE BRANCH
+--------------------------------------
+- CameraX manual ISO+exposure and exact diopter focus with unified request
+  controls, so focus changes should not wipe manual exposure.
+- LIVE ISO & logarithmic exposure sliders in browser with numeric inputs.
+- CaptureResult logging of actual ISO, exposure, frame duration, focus, crop,
+  NR/EDGE and requested ISO, shutter, crop.
+- Exclusive LG zoom selection: CameraX ISP crop OR OpenGL GPU ROI OR optional
+  vendor zoom (last is unsupported on observed Camera0 tags).
+- High-res capture requests: 4160x3120 (~13MP/4:3), 4000x3000 (~12MP/4:3),
+  4160x2340, 3840x2160, 3264x2448.
+- OpenGL RoiCrop.windowForOutput(sourceW,H,outputW,H,zoom,...): no bars, aspect
+  derived from target encoder output; 16:9 was default only due 960x540
+  preset, NOT inherent. CameraX and direct Camera2 share GLES path.
+- Opt-in direct LG Main0 Camera2: one PRIVATE SurfaceTexture, output via
+  existing GLES -> hardware H.264 -> RTSP/ONVIF. It supports REAL
+  TEMPLATE_ZERO_SHUTTER_LAG(5) vs RECORD(3) A/B, PREVIEW and NR/EDGE FAST/HQ.
+  This direct backend intentionally CANNOT provide CameraX ImageAnalysis,
+  MJPEG, still snapshots, motion monitor, or phone-screen Preview concurrently;
+  these force CameraX path. Direct startup with no frame fails over to CameraX.
+- CameraX standard FAST / HIGH_QUALITY NR + EDGE option, where supported;
+  quality/composition on hardware NOT YET verified. These are not OEM solution
+  commands. Actual CaptureResult can contradict request.
+- No proprietary OEM camera binaries in repository; ROOT diagnostic scripts are
+  read-only. Manufacturer libraries not injected into app or camera service.
+- Gradle Rust native target only aarch64-linux-android; release ABI split
+  arm64-v8a only; CI checks debug APK lib/ paths.
+- Windows read-only PowerShell ADB collector:
+    scripts/lg-g6-main0-windows-diagnostics.ps1
+  Shell read-only optional rooted collector:
+    scripts/lg-g6-main0-diagnostics.sh
+- General docs: LG_G6_H872_MAIN0.md, FORK_ANDROID8.md.
+- Unit tests include geometry of ROI and template numeric IDs.
+
+KNOWN ISSUES / PITFALLS
+-----------------------
+1. Last requested output was still 960x540 = 16:9; change defaults to 4:3
+   and allow 1:1 output. Avoid label "4K" for actual 4160x3120 image.
+2. Direct Camera2 PRIVATE size selection chooses closest advertised size,
+   NOT guaranteed exact 4160x3120, log negotiated size; 4000x3000 may not
+   be advertised for PRIVATE. High-res CameraX Preview may also negotiate low.
+3. Main0 advertises CENTER_ONLY crop; hardware ISP cropping can't pan off
+   center; GPU crop can pan. Never stack 4x ISP and 4x GPU.
+4. Crop-to-fill still intentionally removes source area if target aspect
+   differs: 4:3 output from 4:3 source avoids this extra cropping.
+5. For H.264 from 4160x3120 with zoom4, native crop is approximately
+   1040x780. Output ~960x720 (4:3) is appropriate; for square output
+   native crop is ~780x780, output ~768x768 avoids upscaling.
+6. Camera2 ZSL template does NOT prove stock LG denoise/color/edge parity.
+   Follow OEM Preview/HAL tune paths only from actual data, not guesses.
+7. H.264/RTSP/ONVIF might be intact at compile but must be tested physically.
+8. Real 12MP Video/Preview and long run / thermals are NOT verified.
+9. One CI run failed due transient dependency resolution; another identical
+   commit succeeded. Retry transient downloads automatically; avoid duplicate
+   PR + push runs and confusing failed status.
+10. Review manual ISO >800 experiments: HAL may reject requests, cause stalls.
+    Keep disabled by default and provide reliable safe fallback.
+11. Debug APK may fail in-place install against differently signed existing
+    app. Back up settings before uninstalling.
+
+TO RESUME (MANDATORY STEPS FOR THE NEXT ENGINEER/AI)
+----------------------------------------------------
+A. Read THIS FILE and AGENTS.md FIRST, then inspect branch head/PR1.
+B. Read newest GitHub Actions logs for the EXACT head commit; do not mistake
+   a successful run of an old commit for validation of current code.
+C. Check and update this file IN EVERY FUNCTIONAL CHANGE session, including
+   what you changed, verified, what failed and what to do next. Preserve past
+   failures and decisions, append dated entries; do not erase history.
+D. Never commit proprietary LG DLL/SO/APK or sensitive logcat contents.
+E. Guard all OEM features by exact model LG-H872 and Camera2 ID0.
+F. Test 4:3 960x720 and square 768x768 outputs, with actual input
+   resolution telemetry. Add unit tests for both shapes, no forced 16:9.
+G. Download/install the newest artifact and ask for real LG H872 diagnostics
+   if hardware results needed; CI success alone is not device validation.
+H. Keep PR1 DRAFT until user confirms A/B and no regressions.
+
+LAST DEVELOPMENT ENTRY
+----------------------
+2026-11-19: User reported one build failure and requested persistent history.
+Diagnosis: duplicate workflow for SHA 55b243cc; one run passed with artifact,
+another failed fetching Maven dependencies; release reproducibility passed.
+Action planned this session: strengthen CI transient retry, avoid duplicate
+internal PR builds, switch LG 4x preset to 4:3 output, offer 1:1 shape selector,
+test both, update PR and this file with final run SHAs and links.
+SESSION UPDATE — 2026-11-19, AFTER USER'S BUILD FAILURE / ASPECT REQUEST
+---------------------------------------------------------------------------
+USER SAID: one build failed; 16:9 not required, 4:3 or 1:1 is acceptable;
+keep detailed persistent GitHub development history for any future handoff.
+
+FINDINGS AND FIXES (COMMITTED, NOT YET DEVICE-VERIFIED):
+- Confirmed same SHA 55b243cc had a passing debug APK/unit-test build
+  (44529567261), passing reproducible release (44529578809), AND one
+  FAILED duplicate internal PR debug job (44529577864) caused by Gradle
+  Maven/Google repository download errors. Thus NOT a proven Kotlin compile bug.
+- 6c2c6800: created this DEVELOPMENT_HISTORY.txt persistent plain text log.
+- 64d75e05: added AGENTS.md directing all future agents to this file.
+- 2685836b: Main0 shape chooser mapping and LG presets now use 4:3
+  960x720 by default; allow square 768x768 and optional 16:9 960x540.
+- 66c91e65: /info.json returns persisted lgOutputShape.
+- d2e61f14: browser selector, photo-source explanation and corrected
+  ISP4x/GPU4x buttons. User selection works for both CameraX and direct
+  Camera2, because GPU crop geometry derives from encoded output size.
+- 54f2fa30: added 4:3 zoom4 1040x780 and square zoom4 780x780
+  ROI geometry, edge-panning, and 1x full-source tests. Still retains
+  historical optional 16:9 tests.
+- cac1fa10: scripts/ci-gradle-retry.sh, retries only dependency resolution
+  errors; Kotlin/Gradle/unit-test failures still fail immediately.
+- 76fd3d87: Android 8 Actions skip duplicate in-repo pull_request
+  jobs when branch push handles build, detect transient Maven problems,
+  avoid unzip/grep SIGPIPE in arm64 native-library verification.
+- be97fd68: reproducible release builds also get bounded Maven retries.
+- 3b3fdf2a: LG_G6_H872_MAIN0.md documentation correct 4:3 default.
+- 503b584c: bump versionCode 182 / versionName 0.18.0-delliaf.2;
+  debug output filename explicitly arm64-v8a.
+- 0e84c500: Android Actions skip doc-only commits.
+- 4363d93a: release Actions on feature branch (instead of redundant
+  internal PR run), skip docs-only, latest functional workflow update.
+- PR #1 remains DRAFT, main unchanged, user hardware test still pending.
+
+LATEST TARGET SOURCE CODE SHA AT TIME OF THIS UPDATE:
+  4363d93a40f3a486bc93f85a7cef4c1d255c5804
+NEW CI RUNS (CHECK FINAL STATUS BEFORE RECOMMENDING AN APK):
+  debug   https://github.com/Delliaf/android-ip-camera/actions/runs/44541674580
+  release https://github.com/Delliaf/android-ip-camera/actions/runs/44541674723
+Both were IN PROGRESS when last checked; do not claim success until actual
+run conclusion is SUCCESS. A subsequent pure journal commit should not
+cause APK recompilation because paths-ignore was added to workflows.
+The new version should be tested on actual H872 for input 4160x3120
+and 4000x3000 acceptance; 4:3 vs square photo-quality and ZSL A/B
+remain unverified.
+
+NEXT STEPS:
+1. Inspect exact latest code SHA, GitHub runs/artifacts, identify any
+   failure and fix it. Use returned job logs, not prior chat claims.
+2. If debug succeeds, download arm64 debug ZIP artifact; confirm .apk,
+   package name and install/upgrade semantics on LG-H872.
+3. Test GPU 4x native 4:3 960x720 first, then 1:1 768x768, compare
+   against CameraX ISP4x and direct Camera2 ZSL(5)/RECORD(3).
+4. Capture actual PRIVATE/Preview request.resolution AND CaptureResult
+   sensor crop, NR/EDGE, manual ISO, frameNs and source FPS. Use
+   scripts/lg-g6-main0-windows-diagnostics.ps1.
+5. Validate RTSP/RTCP/ONVIF, MJPEG fallback, camera reopen, dark noise
+   and thermal behavior on device. No false assurance from CI alone.
+6. APPEND verified run results and future changes to THIS TEXT FILE.
+
+
+
+SESSION UPDATE — 2026-11-19, LG-G6-main0-20261119-174003.zip
+---------------------------------------------------------------------------
+USER REPORT: Direct Camera2 extremely dark in EVERY template/profile. CameraX
+less dark. Manual ISO values over 800 did not appear to apply.
+ARCHIVE ANALYZED LOCALLY ONLY (26 files, ~229 KiB ZIP). DO NOT COMMIT the
+archive/raw logcat to public GitHub. Read-only Windows ADB capture 17:36..17:40.
+
+VERIFIED FROM ACTUAL LG H872 LOGS:
+- Direct Camera2 PHOTO_ZSL, VIDEO/RECORD, HQ, FAST and DEFAULT all produced
+  CaptureResult frames, but user's visual report is they are very dark.
+- With AUTO exposure, Camera0 reported ISO 2728 and shutter 66,666,672 ns
+  (~66.67ms, ~1/15 s), frame duration 66,771,888 ns. This was genuine
+  *result* ISO, while requestISO=100 / requestShutterNs=20651 in the old log
+  came from template DEFAULT values and ARE IGNORED WHEN AE IS AUTO.
+- With manual exposure, ISO 400 and ISO 800 were both actually applied:
+  result ISO400 at ~19.99ms, ISO800 at ~17.67ms; later ISO800 with
+  ~0.337ms shutter (very dark); also ~588ms shutter causing ~1.7fps.
+  No trace in this log of a successful manual request or result above ISO800.
+  This does NOT prove HAL never accepts >800; opt-in extended ISO needs a
+  fresh controlled test with AE=MANUAL and request vs result values.
+- Direct CaptureResult reports focusD=4.502924 throughout tested profiles;
+  probable stale manual focus. In code, applyStored() previously applied
+  legacy "focus_distance" prefs even when LG focus mode was "auto".
+- Direct source negotiated PRIVATE 960x720, not 4160x3120. Do not conclude
+  from this log that the direct photo mode ran at 13MP.
+- ISP NR modes differ: VIDEO/DEFAULT/FAST results NR=1 EDGE=1; HQ results
+  NR=2 EDGE=2; ZSL results NR=4 EDGE=3. This proves that the OEM
+  ZSL template toggles ISP processing, not that it matches the stock
+  LG Camera app's full image enhancement.
+- Qualcomm OMX video encoder twice failed configuration for 800x600
+  after mode switches (OMX UnsupportedSetting / MediaCodec CodecException
+  error 0xfffffc0e = -1010). Some dimensions are unsupported; avoid them.
+  The user also reported handshake errors but these are unrelated to sensor
+  exposure; no private IP addresses are preserved in this public journal.
+- Logs cannot determine visual brightness/color curve precisely without
+  recorded image frames; USER VISUAL REPORT is treated separately from HAL
+  readback. AUTO ISO 2728 shows manual 800 cap alone does not fully explain
+  dark Direct images; missing OEM ISP tone-processing is one hypothesis.
+
+COMMITS IN THIS SESSION (check current SHA via GitHub):
+- 390ba0b6 + 62b1740b: pure codec-safe 16-pixel aligned fallback math and
+  unit tests; 800x600 falls to 768x576 while preserving 4:3.
+- cd6bc92d: optional GLSL tone gamma applied to Direct Camera2 GPU output;
+  default 0.80 brightens midtones, 1.00 is neutral A/B reference; this is
+  NOT sensor ISO, not a way to recover lost sensor detail.
+- 5a266fcb: Direct AVC startup retries one aligned output size on -1010;
+  restore LG AUTO focus rather than legacy stale normalized manual focus;
+  read/write gamma pref and live GPU effect.
+- 2451849c: CaptureResult telemetry explicitly reports AE AUTO/MANUAL,
+  AE state, compensation and labels template requestISO ignored in auto AE.
+- a3cb9fdb: optional manual ISO>800 now detects rejected HAL requests or
+  persistent mismatched actual ISO and falls back safely to advertised range
+  without stopping the camera; automatically disables experimental switch.
+- 8131758f + 5075b0d9: info.json and LG web panel gain per-LG direct-gamma
+  control 0.45..1.50 and clear AE mode explanation.
+- 67666426: fixed own fallback unit test expectation (960x540 -> 768x432).
+- 891c55af: LG-H872 Camera0 uses 960x720 instead of 800x600 for legacy
+  "low/auto" output to avoid known QCOM encoder error; resolve camera ID
+  before calculating auto output size.
+- 588d4e5f: versionCode 183, versionName 0.18.0-delliaf.3.
+- Keep arm64-v8a only and PR1 DRAFT. No root HAL injection performed.
+
+BUILD STATUS:
+  Latest functional commit: 588d4e5f63b60cc8ef51538538d9600b711022d6.
+  Check GitHub Actions for EXACT SHA; DO NOT claim success until tests and
+  ARM64 APK artifact are produced. Since this text-only history commit is
+  paths-ignored by CI, look for runs on functional SHA above.
+  Browse: https://github.com/Delliaf/android-ip-camera/actions
+
+NEXT DEVICE TESTS:
+1. Install new arm64-v8a APK after CI passes. Use main Camera2 ID0.
+2. DIRECT photo ZSL in AUTO AE and AUTO focus, 4:3 960x720, software gamma 1.00.
+   Record result ISO/shutter/AE/NR/EDGE and visual darkness vs CameraX.
+3. Without changing lighting, try gamma 0.80, 0.65, 0.50. This changes only
+   output midtones; note noise, banding and highlight clipping separately.
+4. Test manual ISO 400 then 800 @ shutter 20ms, then (opt-in) ISO 1600
+   @ 20ms, compare request and CaptureResult; check whether HAL falls back.
+5. Try exact source 4160x3120 with 4x GPU and see negotiated source size,
+   then 12MP 4000x3000 if advertised; at 4x test 4:3 960x720 and
+   square 768x768.
+6. Test rapid switches Direct ZSL/VIDEO/CameraX, encoder recovery, RTSP/
+   ONVIF/mjpeg and thermal after 15 minutes.
+7. Capture images/clips if gamma 1.00 Direct remains dark with AE ISO2728,
+   because logcat alone cannot prove a missing color transform.
+
+
+
+IMPORTANT FOLLOW-UP — 2026-11-19, ROOT CAUSE: DIRECT AE FPS RANGE
+---------------------------------------------------------------------------
+Inspected the LG-H872 Camera0 metadata in the uploaded ZIP and compared our
+code paths. The actual Camera2 CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES list
+includes [15,15], [20,20], [2,24], [24,24], [2,30], [30,30].
+LG Direct Camera2 originally used:
+    ranges?.firstOrNull { it.lower <= fps && it.upper >= fps }
+At 15 fps this picks [15,15] and restricts AUTO exposure to ~66.7ms.
+CameraX instead uses:
+    ranges?.maxWithOrNull(compareBy({ it.upper - it.lower }, { it.upper }))
+which picks the much wider [2,30], permitting longer night exposures.
+THIS IS A MAJOR LIKELY CAUSE of the user's very dark Direct picture, and
+is more concrete than assuming that a manual ISO 800 ceiling is the cause.
+No claim that it is the only cause; OEM ISP tone processing still differs.
+The test archive shows actual AUTO ISO2728 @ 66.667ms while direct fixed
+range; the wide-range fix must be tested physically and FPS tradeoff noted.
+
+NEW CODE:
+- 2d67f2b3 / 42ff8a17: pure LgG6AeFps.select() and JVM tests, asserting
+  adaptive 15 fps selects [2,30] while fixed profile selects [15,15].
+- 59f355e9: LG Direct repeating AUTO request now chooses adaptive wide
+  range by default; fixed remains an explicit A/B fallback option.
+- 5365dff5 / 97998a2b: persist Direct AE FPS mode and expose via info.json.
+- 2f60a514: browser select Adaptive (recommended) vs Fixed target FPS.
+- bc8769f6: CaptureResult log includes requested/actual AE FPS ranges.
+- aa288fb6: versionCode 184, versionName 0.18.0-delliaf.4.
+
+MOST RECENT FUNCTIONAL COMMIT FOR BUILD VERIFICATION:
+    aa288fb6509e28f21544acd16c4cdb50a8dcfe8e
+GitHub Actions:
+    https://github.com/Delliaf/android-ip-camera/actions/runs/44549683759
+    https://github.com/Delliaf/android-ip-camera/actions/runs/44549683761
+These were pending/in progress when first recorded. Check CONCLUSION and
+ARM64 artifact before recommending installation; newer docs-only commits
+are intentionally ignored by CI.
+
+NEW DEVICE A/B:
+- Select Camera ID0, Direct Camera2, AUTO exposure, Auto focus, output 4:3.
+- Choose Adaptive 2..30 AE with gamma=1.00 and capture actual ISO,
+  exposure duration, aeFpsReq and aeFpsActual; compare night brightness.
+- Repeat Fixed 15 FPS with gamma=1.00 in identical lighting.
+- Gamma 0.80/0.65 ONLY if adaptive AE still looks too dark; compare frame
+  drops, CPU and grain. Do not confuse display correction with ISO or SNR.
+- For manual ISO>800 opt-in, use manual AE with a fixed 20ms shutter, check
+  actual result vs requested and monitor automatic safe fallback.
+- Keep source and output shape 4:3 or 1:1 to avoid 16:9 loss.
+- Report if QCOM AVC -1010 recurs after new 960x720 auto default and
+  codec fallback; log exact encoder requested/aligned dimensions.
+
+
+
+ISO EXTENSION SAFETY CORRECTION — 2026-11-19
+---------------------------------------------
+An additional review caught a subtle mistake in the first safe fallback:
+the threshold "actual < requested * 0.90" would disable experimental
+manual ISO if the user requested 3200 and the HAL returned 2728.
+BUT ACTUAL 2728 IS STILL SIGNIFICANTLY ABOVE THE ADVERTISED MAX OF 800,
+and such partial success should be preserved, not thrown away.
+Commits db094bb8 + 5a81fcc3 introduced the pure
+LgG6IsoVerification.extendedRequestIgnored() function and unit tests.
+Commit 2e4cc412 now disables extended mode only when requested ISO is
+above advertised max but CaptureResult continues at approximately the
+advertised max (plus 5% tolerance), or if HAL directly rejects request.
+This avoids silently losing useful >800 capability.
+
+LATEST FUNCTIONAL SHA REQUIRING CI:
+  2e4cc4125e2e2ff953d1a0dfe9746d50170ebbc9
+  Debug: https://github.com/Delliaf/android-ip-camera/actions/runs/44550645879
+  Release: https://github.com/Delliaf/android-ip-camera/actions/runs/44550645806
+Both jobs had not completed on first inspection. Only claim a new APK is
+built/tested after these runs succeed; any doc-only HEAD can be newer.
+
+
+==============================================================================
+
+
+SESSION 2026-11-19 ~15:25Z — go2rtc ONVIF reset; CPU and temperature overlay
+==============================================================================
+USER REPORT:
+  go2rtc POST http://PHONE_IP:8000/onvif/device_service
+  "read: connection reset by peer". Setting password did not help;
+  password is unwanted for trusted LAN. User requested total CPU usage and
+  temperature beside existing battery and Wi-Fi and noted other code
+  changes had landed since prior assistant work.
+
+BRANCH SAFETY:
+  Original feature/manual-camera-4k-stream HEAD at start:
+    986d3c8972334b1aa689478a3484b3ac8c304f66
+  That branch includes other recent work (LG direct AE FPS, gamma,
+  ISO >800 safety and latest 0.18.0-delliaf.4). The older
+  feature/lg-h872-main0 PR#2 was NOT overwritten.
+  Created NEW branch fix/onvif-go2rtc-telemetry from the exact SHA.
+  New draft PR: https://github.com/Delliaf/android-ip-camera/pull/3
+  PR targets feature/manual-camera-4k-stream and MUST remain unmerged
+  until LG G6 go2rtc hardware testing succeeds.
+
+CAUSE IDENTIFIED FROM REAL SOURCE (no guess about password):
+  TlsHelper.isEnabled() defaults TRUE; OnvifServer got
+  tls = { TlsHelper.serverConfig(this) } from StreamingService.
+  This binds tcp/8000 with HTTPS. Go2rtc onvif:// uses a plaintext HTTP
+  SOAP POST to http://PHONE:8000/onvif/device_service, so handshake
+  mismatch can reset TCP before SOAP authentication even begins.
+  The exact real-phone root cause still requires verification with TLS
+  change and go2rtc; the code path is confirmed.
+
+CHANGES:
+  - app/src/main/res/xml/preferences.xml: added onvif_tls_enabled (TRUE
+    by default to preserve existing encryption); settings text warns
+    plaintext ONVIF HTTP credentials are unencrypted.
+  - activities/SettingsActivity.kt: new ONVIF HTTPS toggle is visible
+    when RTSP/ONVIF enabled; defer StreamingService restart until the
+    new preference has been stored (avoids old-value restart race).
+  - StreamingService.kt: ONVIF TLS setting independent of web/RTSPS
+    TLS. Turning OFF ONVIF TLS serves HTTP on ONVIF port 8000 only.
+  - helpers/OnvifServer.kt: log SSL handshake and HTTP socket errors
+    (previously swallowed silently), pointing to scheme mismatch.
+  - app/src/test/.../OnvifServerTest.kt: REAL TCP no-auth HTTP SOAP
+    GetCapabilities and GetProfiles regression tests.
+  - DevicePerformanceMonitor.kt (NEW): use /proc/stat delta system
+    CPU % at >=4s intervals. If denied by Android, fallback to
+    Process.getElapsedCpuTime()/elapsedRealtime()/cores with
+    cpuScope="app" clearly labeled. CPU/SoC named thermal zone temp
+    sampled no faster than 20s; fallback to battery sticky broadcast
+    with temperatureSource="Battery". No root/su commands.
+  - StreamingServerHelper.kt: CPU, source and temperature in /info.json;
+    new AUTHENTICATED lightweight /metrics.json (same auth as other
+    endpoints) avoids costly Camera2 introspection each 5s.
+  - assets/index.html: CPU and properly labeled temperature beside
+    battery and Wi-Fi; 5s lightweight polling; responsive overlay.
+  - DevicePerformanceMonitorTest.kt (NEW): cpu counter delta/negative/
+    malformed inputs, thermal Celsius scaling. Kotlin JVM tests.
+  - GO2RTC_ONVIF_AND_METRICS.md (NEW): setup, HTTP SOAP verification,
+    no-auth trusted LAN instructions, HTTPS web/RTSPS distinction.
+  - app/build.gradle: versionCode 185, versionName
+    0.18.0-delliaf.5. arm64-v8a-only unchanged.
+  - .github/workflows/android8-fork-ci.yml: enable ARM64 CI on this
+    branch. No changes to original CI scripts/steps.
+
+NEW CI (PENDING / CHECK CONCLUSION FOR EXACT HEAD BEFORE CLAIMING TESTED):
+  Initial run https://github.com/Delliaf/android-ip-camera/actions/runs/44554322237
+    head 2764d96434 (superseded by preference-restart race fix)
+  New run https://github.com/Delliaf/android-ip-camera/actions/runs/44554725993
+    head 60e41c0419 (SettingsActivity deferred restart included)
+  Newly created PR #3 may generate "skipped" internal-PR jobs by
+  design. These are not failing builds. Actual push build on the
+  feature branch is the relevant Android test.
+  If CI is successful, download Actions artifact
+    android-ip-camera-android8-debug
+  Inspect lib/arm64-v8a only, build/version metadata and install on
+  LG-H872. Debug signature may conflict with installed APK.
+
+HOW TO CONFIRM USER ISSUE:
+  1) Install APK built for this exact HEAD, enable RTSP.
+  2) Settings > RTSP / ONVIF > ONVIF over HTTPS (TLS) = OFF.
+     Leave main web TLS = ON if desired. Optional: disable application
+     authentication separately for an isolated trusted LAN.
+  3) go2rtc stream: onvif://PHONE_IP:8000
+  4) Expect HTTP SOAP GetCapabilities/GetProfiles success; check
+     advertised RTSPS/RTSP next. App logcat ONVIF should show action.
+  5) Browser status now shows CPU system or App CPU fallback plus
+     CPU/SoC or Battery temperature with correct label. Check after
+     ~5-10s; verify readings against dumpsys/root diagnostics.
+  6) Run same connection test with TLS ON intentionally: expect
+     SSL/TLS handshake error until client uses HTTPS; ensure web HTTPS
+     and RTSPS have NOT been disabled by ONVIF toggle.
+  7) If HTTP still resets, inspect new OnvifServer logcat and go2rtc
+     DEBUG output; possible remaining issues: HTTP parser, chunked
+     request body, SOAP XML namespaces, device service advertised URLs.
+  8) Keep code and actual user logs separate; do NOT commit private IPs,
+     passwords, camera binaries or raw Android logs to the public repo.
+
+NEXT WORK:
+  Verify GitHub Actions for the *latest* functional commit.
+  Fix any Kotlin/unit tests, update this history with exact result SHA,
+  APK link and status. Keep PR #3 draft until physical go2rtc smoke test.
+==============================================================================
+
+
+VERIFIED CI RESULT — go2rtc / CPU telemetry, 2026-11-19 15:30:56 UTC
+==============================================================================
+GitHub Actions run:
+  https://github.com/Delliaf/android-ip-camera/actions/runs/44554725993
+Outcome: COMPLETED SUCCESS
+Exact TESTED FUNCTIONAL COMMIT:
+  60e41c041981a32b05e7e8468be73d8d568b2bbc
+Passing steps:
+  - JavaScript syntax validation for the embedded web dashboard
+  - :app:testDebugUnitTest + :app:assembleDebug (Gradle/Java17/Rust)
+  - Verify no non-arm64 native libraries inside debug APK
+  - Upload installable debug artifact
+Artifact:
+  android-ip-camera-android8-debug
+  artifact id 14545036925
+  https://github.com/Delliaf/android-ip-camera/actions/runs/44554725993
+  artifact compressed ZIP size 11,207,022 bytes (NOT unpacked APK size)
+Package version: 0.18.0-delliaf.5 (versionCode 185), Android 8+;
+  ARM64-V8A ONLY.
+
+Only the GO2RTC_ONVIF_AND_METRICS.md and DEVELOPMENT_HISTORY.txt docs
+were changed AFTER this tested code SHA. Changes to AGENTS.md are
+also documentation-only. Hence the successful build tests all functional
+ONVIF, metrics and settings changes in PR #3.
+
+No real-device go2rtc session has yet been verified, so keep the PR
+DRAFT; the diagnosis of a transport mismatch is supported by source code,
+but exact H872 network behavior and CPU-temperature availability require
+device logs. To use with go2rtc on an isolated/trusted LAN: turn OFF only
+"ONVIF over HTTPS (TLS)" in Settings > RTSP / ONVIF, restart,
+then configure onvif://PHONE_IP:8000. Turning OFF ONVIF HTTPS must NOT
+disable the main web TLS or RTSPS.
+==============================================================================
+
+
+2026-11-19 — EXPERIMENTAL AUTOMATED IMAGE QUALITY BENCHMARK (NEW PR #4)
+==============================================================================
+User proposed in-app automatic analysis of image quality: sweep Camera0 modes
+and meaningful settings, use the highest available source resolution, apply a
+constant 4.5x digital zoom, store example frames plus per-case measurements
+and camera readback in a portable ZIP. Parent branch = fix/onvif-go2rtc-telemetry
+(v0.18.0-delliaf.6, successful APK Actions run 44556499036).
+Do not overwrite existing PR #1/#2/#3 or stable main.
+
+NEW DEVELOPMENT BRANCH:
+  feature/lg-main0-auto-image-benchmark
+DRAFT PR:
+  https://github.com/Delliaf/android-ip-camera/pull/4
+VERSION:
+  0.18.0-delliaf.7 / versionCode 187 / ARM64-V8A ONLY / Android 8+
+CODE FILES:
+  helpers/LgBenchmarkPlan.kt: fixed 4.5x, bounded Quick <=24 and Deep <=90
+    test cases using supported PREVIEW(1), RECORD(3), ZSL(5), ISP vs CPU
+    crop, finite enumerated NR/EDGE/aberration/AWB settings, representative
+    ISO/shutter and manual-focus samples. Full Cartesian enumeration of
+    continuous ranges is intentionally impossible/unsafe.
+  helpers/LgBenchmarkImaging.kt: normalize YUV_420_888 full source into
+    comparable 4.5x information-scale NV21/JPEG; 4:3 or square crop;
+    measure mean luma, contrast stddev, histogram p01/p99, clipping,
+    edge energy, Laplacian variance and temporal frame difference.
+  helpers/LgMain0ImageBenchmark.kt: exclusive Camera2 ID0 session, try
+    highest supported YUV resolution then fallback; read actual Camera2
+    TotalCaptureResult (ISO, exposure, focus, crop, frame duration,
+    NR/EDGE/AWB/AE); JPEG for each passing case; ZIP includes report.json,
+    results.csv, device.json, samples/*.jpg, README.txt. Strict per-case
+    failure isolation, cancellation, temperature/time safety limits.
+  activities/LgMain0BenchmarkActivity.kt: offline Quick/Deep UI, local ZIP
+    path, Android SAF export via CreateDocument application/zip, no upload.
+  MainActivity.kt, activity_main.xml, AndroidManifest.xml: H872-only
+    gallery-icon launcher, explicit warning that streaming/recording is
+    interrupted; stop foreground StreamingService before Camera2 test and
+    restore service when user returns.
+  app/src/test/.../LgBenchmarkPlanTest.kt: planning/ISO/noise image math
+    unit tests; no device image needed.
+  LG_G6_MAIN0_IMAGE_BENCHMARK.md: operating and validation guide.
+  app/build.gradle: version bumped to .7.
+  .github/workflows/android8-fork-ci.yml: enable branch push CI.
+
+UNVERIFIED / IMPORTANT:
+- Root not required or used; OEM .so/APK not embedded.
+- YUV_420_888 at 4160x3120 may not be accepted for repeating session,
+  even when available output sizes include it. Runner tries next smaller.
+- The actual PHOTO preview of stock LG is NOT guaranteed merely by
+  selecting ZSL template5; proprietary ISP/CPP processing may differ.
+- The first benchmark exercises Camera2 templates and standard ISP vs
+  software center cropping. CameraX-specific Preview image capture and
+  encoder output are NOT yet captured by this test.
+- Matched sample JPEGs are native *information scale*, e.g. 4160x3120
+  source / 4.5x -> approx 924x692 (or square 692x692). Do NOT claim
+  these are 13MP 4.5x original-detail frames.
+- Frame-to-CaptureResult association is based on last completed result
+  near image delivery, not exact timestamp matching. It is documented
+  in report; improve pairing if hardware tests show ambiguity.
+- No attempt to declare highest subjective quality from a single
+  edge/laplacian metric; charts and real scene/tripod are needed.
+- On-device tests, thermal limits, camera pause/resume, zip writing,
+  and RTSP/ONVIF behavior after exit are NOT yet verified.
+- CI must pass for latest functional code SHA (see GitHub PR #4 Checks).
+  One early build run 44559925986 was CANCELLED by subsequent doc commit;
+  use run 44560189309 or later result for actual compilation.
+- Case failures are expected and recorded, especially unsupported Camera2
+  TEMPLATE_ZSL / HDR / NR combos.
+
+NEXT ENGINEER START HERE:
+1. Open PR #4 and inspect latest head commit, GitHub CI run/jobs/logs.
+   Fix all Kotlin, Android resource and JVM-test errors; repeat until
+   ARM64-v8a APK build artifact succeeds for current SHA.
+2. Install APK on H872 while backed up, tap gallery icon, run QUICK 4:3.
+   Confirm streaming service closes and reopens, no stuck Camera0.
+3. Verify max YUV size, 4.5x crop, per-case JPG, report.json Actual vs
+   Requested, thermals, cancellation, exported ZIP via Android SAF.
+4. Run Deep mode on tripod/fixed scene, examine mode failures; use
+   report and images for best Camera0 PHOTO/ZSL vs VIDEO/RECORD comparison.
+5. Extend with a CameraX-specific frame test if direct Camera2 benchmark
+   cannot reproduce the sharp OEM photo preview. Consider timestamp-exact
+   CaptureResult linkage and staged ISO/AF/AE settling diagnostics.
+6. Append date, SHA, CI URLs and measured device outcomes to THIS FILE
+   after every milestone. Never commit sensitive pictures/diagnostic ZIPs.
+==============================================================================
+
+
+VERIFIED BUILD — LG Camera0 4.5x AUTOMATIC IMAGE BENCHMARK
+==============================================================================
+DATE: 2026-11-19
+PR: https://github.com/Delliaf/android-ip-camera/pull/4
+BRANCH: feature/lg-main0-auto-image-benchmark
+EXACT TESTED FUNCTIONAL COMMIT:
+  bbe1141f069dd04666deb5c9ce9e5401bc6e802b
+GITHUB ACTIONS RUN — COMPLETED SUCCESS:
+  https://github.com/Delliaf/android-ip-camera/actions/runs/44561531501
+BUILD ARTIFACT (ZIP, contains APK):
+  android-ip-camera-android8-debug
+  artifact id: 14549656797
+  compressed size: 11,242,905 bytes
+  build version: 0.18.0-delliaf.7 / versionCode 187
+  target OS: Android 8+ / ARM64-V8A ONLY
+
+SUCCESSFUL CI STEPS:
+  - Embedded browser JavaScript syntax validation
+  - :app:testDebugUnitTest + :app:assembleDebug (including benchmark code)
+  - Unpacked APK native libraries all under lib/arm64-v8a/
+  - Artifact published
+Kotlin/JVM TESTS INCLUDE:
+  LgBenchmarkPlanTest (PREVIEW/RECORD/ZSL matrix, crop pipelines, ISO bounds,
+  luminance clipping, uniform vs varying sharpness, temporal difference).
+  Earlier ROI, ONVIF, RTSP, and other unit tests also ran.
+
+NOT YET VERIFIED BY HARDWARE:
+  - 4160x3120 YUV repeating Camera2 session accepted + active frame delivery,
+    correct native 4.5x crop, sample colors, timestamp/readback pairing.
+  - Camera0 exclusive access/reopen after stopping existing service;
+    return to RTSP/ONVIF and previous recording settings.
+  - Thermal safety, cancellation, long deep test stability and ZIP
+    export through Android storage picker on LG-H872 Android 8.
+  - Template5 ZSL-like images actually resemble LG OEM photo preview.
+  - Effects of selecting ISO, NR and focus on real photos.
+
+CURRENT IMPLEMENTATION:
+  - Both Quick (up to 24 cases) and Deep (up to 90) available via LG-only
+    in-app gallery button. Fixed 4.5x. Highest DELIVERING YUV size selected;
+    configured-but-silent resolutions automatically fall back.
+  - ISP vs software ROI images normalized to matching *true sample scale*,
+    not cosmetically upscaled source resolution.
+  - Actual Camera2 result paired to image.timestamp/SENSOR_TIMESTAMP where
+    possible. CSV and JSON include ISO/shutter/NR/EDGE, exposure, sharpness,
+    noise, clipping and mismatch flags; failed cases retain error messages.
+  - ZIP stored locally and exported via Android ACTION_CREATE_DOCUMENT;
+    NO auto-upload of scene photos.
+  - On-device activity requires manual activation and suspends camera
+    streaming during tests; original service resumes on return.
+
+FIRST ON-DEVICE STEPS:
+1. Install artifact from the VERIFIED run. Back up settings if APK signing
+   differs from the existing installed version.
+2. Select Camera0 on LG-H872. Open benchmark with gallery icon.
+3. Start Quick 4:3 with a stable target/tripod, examine whether max YUV
+   4160x3120 was accepted and delivering; otherwise note fallback size.
+4. Export ZIP, review report.json for successes/failures and visually
+   compare paired samples. Optionally run Deep and 1:1 afterward.
+5. Use device logs if session/focus/ZSL modes fail; never commit images
+   or raw private logs into public GitHub.
+6. Append actual device results and changes to THIS FILE before merging.
+All PRs #1/#2/#3/#4 remain experimental and draft pending LG device tests.
+==============================================================================
+
+
+2026-11-19 — LG G6 CPU / TEMPERATURE NOT VISIBLE: OVERLAY FIX
+==============================================================================
+USER OBSERVATION:
+  Battery charge and Wi-Fi displayed on web camera overlay; CPU load and
+  CPU temperature were absent in the installed APK despite source work.
+  No fresh device log/screenshot was provided, so a specific on-device
+  source permission failure is NOT proven.
+
+SOURCE AUDIT AND DEFECTS:
+  1. app/src/main/assets/index.html previously set cpuStatus and
+     temperatureStatus display:none when CPU==-1 / temperature null.
+     On Android8 first CPU sample has no reference delta by design; if
+     thermal sysfs is blocked, temperature null. This hid the fields
+     entirely without explaining anything.
+  2. /metrics.json fetch errors were swallowed by .catch(() => {});
+     stale/inaccessible endpoint gave no visible failure indication.
+  3. HTML root lacked Cache-Control; browsers could retain an old index
+     whose DOM did not even contain CPU/temperature spans after update.
+     Root served only exact "/" not "/?v=..." so cache-busting query
+     would yield 404; now path-based root routing works.
+  4. DevicePerformanceMonitor did not recognize Qualcomm "tsens_tz_sensor"
+     SoC thermal zones, using battery fallback even when die readings
+     were available. Rooted LG H872 may need read-only su access for
+     protected /sys/class/thermal and /proc/stat.
+
+IMPLEMENTATION:
+  BRANCH: fix/lg-g6-metrics-visible
+  BASE: feature/lg-main0-auto-image-benchmark, includes .7 auto image tests.
+  VERSION: 0.18.0-delliaf.8 / versionCode 188.
+  - CPU warm-up or missing measurement now visibly reads CPU … rather
+    than hiding the badge. If only app CPU is permitted: App CPU xx%.
+  - Temperature label displays CPU/SoC if found by type, otherwise
+    correctly labels "Battery", or Temp — when no data available;
+    accurate absence vs battery fallback is made explicit in tooltip.
+  - /metrics.json failures now produce CPU — / Temp — and console warning,
+    not silent disappearance. Poll immediately then every 5 seconds.
+  - Root HTML response adds no-store, max-age=0 and charset=utf-8.
+    /?v=8 now loads the dashboard, avoiding old cached versions.
+  - /metrics.json contains cpuNote/temperatureNote, metricsVersion=2,
+    explicit Content-Length, no-store.
+  - CPU system sampled from /proc/stat if possible, app-process fallback
+    otherwise. Qualcomm tsens zones reported as SoC, never asserted to
+    represent exact CPU core temperature.
+  - Settings > Device Monitoring > Use root for CPU/SoC temperature:
+    optional, OFF by default, read-only static shell probes with 900ms
+    timeout. Root failure disables further probes in this session,
+    avoiding repeated root permission dialogs/blocking HTTP service.
+  - scripts/test-metrics-dashboard.cjs exercises the actual web UI
+    renderer with missing/first sample, App CPU + Battery fallback,
+    System CPU + SoC. DevicePerformanceMonitorTest extended for
+    Qualcomm sensor naming. CI now tests both JS and Kotlin, targets
+    Android8 ARM64-V8A only.
+
+MUST STILL VERIFY ON LG H872:
+  - /metrics.json fetched from live phone (use authenticated HTTPS/HTTP
+    same as web UI), includes cpuPercent, cpuScope, temperatureSource.
+  - web overlay after 5-10s shows actual number or explicit unavailable
+    status. Root optional toggle only if CPU/SoC inaccessible.
+  - temp from tsens may be die/SoC, not CPU core. Battery temperature
+    always labeled Battery.
+  - after installing new APK, open ?v=8 to avoid stale cached index.
+  - average memory/CPU overhead, repeated reconnect, stream stability.
+  - exact successful CI run ID/SHA/artifact MUST be appended after build.
+  - no private logs/images uploaded to public repository.
+==============================================================================
+
+
+VERIFIED CI — LG G6 METRICS-VISIBLE PATCH, 2026-11-19
+==============================================================================
+EXACT TESTED FUNCTIONAL SHA:
+  5853755367ae8dc99c338851b2de22214ec8b07a
+GITHUB ACTIONS RUN — COMPLETED SUCCESS:
+  https://github.com/Delliaf/android-ip-camera/actions/runs/44591663439
+ARTIFACT:
+  android-ip-camera-android8-debug
+  artifact id: 14563998935
+  compressed ZIP: 11,246,077 bytes; contains installable debug APK.
+  Version: 0.18.0-delliaf.8, Android 8+, ARM64-V8A only.
+GREEN STEPS:
+  Embedded dashboard JavaScript and scripts/test-metrics-dashboard.cjs
+  :app:testDebugUnitTest + :app:assembleDebug
+  Native JNI architecture verification: lib/arm64-v8a only
+  APK uploaded to GitHub Actions Artifacts
+
+All later changes to DEVELOPMENT_HISTORY.txt / PR body are documentation
+only. No change to tested application bytecode.
+DO NOT CLAIM REAL LG-H872 HARDWARE VALIDATION. User must install and confirm:
+1. Open browser at /?v=8 (bypass old cached HTML).
+2. CPU & temperature badges now visible, or explicit CPU ... / Temp --.
+3. Open authenticated /metrics.json: cpuPercent, cpuScope, cpuNote,
+   temperatureCelsius, temperatureSource, temperatureNote, metricsVersion=2.
+4. Wait >5 seconds for second CPU delta sample; if /proc/stat is denied,
+   app-process CPU fallback should be labeled 'App CPU'.
+5. For rooted phone, optionally enable Settings > Device Monitoring >
+   Use root for CPU / SoC temperature when needed; approve root if prompted.
+6. Check named SoC sensor vs battery label; NEVER call battery CPU temp.
+7. If still missing, export /metrics.json JSON + sanitized adb logcat; do
+   not commit raw device secrets or camera scene images to public repo.
+==============================================================================
