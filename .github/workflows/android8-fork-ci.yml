@@ -43,7 +43,7 @@ jobs:
       - name: Set up Rust for OpenTunnel native library
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-linux-android,armv7-linux-androideabi
+          targets: aarch64-linux-android
 
       - name: Validate embedded browser JavaScript
         run: |
