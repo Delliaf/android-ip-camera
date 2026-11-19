@@ -306,6 +306,24 @@ internal class LgMain0ImageBenchmark(private val context: Context) {
             put("maxNegotiatedYuvSize", "${size.width}x${size.height}")
             put("allAdvertisedYuvSizes", JSONArray(candidates.map { "${it.width}x${it.height}" }))
             put("sensorActiveArray", active?.toShortString() ?: JSONObject.NULL)
+            put("sensorOrientationDegrees",
+                chars.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: JSONObject.NULL)
+            put("lensMinFocusDiopters",
+                chars.get(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE) ?: JSONObject.NULL)
+            put("maximumDigitalZoom",
+                chars.get(CameraCharacteristics.SCALER_AVAILABLE_MAX_DIGITAL_ZOOM) ?: JSONObject.NULL)
+            put("maxFrameDurationNs",
+                chars.get(CameraCharacteristics.SENSOR_INFO_MAX_FRAME_DURATION) ?: JSONObject.NULL)
+            put("advertisedNoiseReductionModes", JSONArray(
+                (chars.get(CameraCharacteristics.NOISE_REDUCTION_AVAILABLE_NOISE_REDUCTION_MODES)
+                    ?: intArrayOf()).toList()))
+            put("advertisedEdgeModes", JSONArray(
+                (chars.get(CameraCharacteristics.EDGE_AVAILABLE_EDGE_MODES) ?: intArrayOf()).toList()))
+            put("advertisedAberrationModes", JSONArray(
+                (chars.get(CameraCharacteristics.COLOR_CORRECTION_AVAILABLE_ABERRATION_MODES)
+                    ?: intArrayOf()).toList()))
+            put("advertisedAwbModes", JSONArray(
+                (chars.get(CameraCharacteristics.CONTROL_AWB_AVAILABLE_MODES) ?: intArrayOf()).toList()))
             put("manualIsoRange", range?.toString() ?: JSONObject.NULL)
             put("exposureNsRange", exposure?.toString() ?: JSONObject.NULL)
             put("testCount", cases)
