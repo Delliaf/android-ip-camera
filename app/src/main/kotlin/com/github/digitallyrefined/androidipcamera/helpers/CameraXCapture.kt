@@ -107,6 +107,7 @@ class CameraXCapture(
     @Volatile private var lgVendorZoom: Float? = null
     @Volatile private var lgPostRawBoost: Int? = null
     @Volatile private var lgFocusPeaking = false
+    @Volatile private var lgPhotoProcessing = "off"
     private val isLgMain0: Boolean get() = LgG6Main0Profile.isTarget(logicalCameraId)
     @Volatile private var lastNv21CachedAtMs = 0L
     private val main = ContextCompat.getMainExecutor(ctx)
@@ -502,6 +503,13 @@ class CameraXCapture(
                 } else Log.w(TAG, "Manual sensor controls unavailable for Camera2 ID=${logicalCameraId}")
             }
             if (isLgMain0) {
+                if (lgPhotoProcessing == "fast" || lgPhotoProcessing == "hq") {
+                    val cm = ctx.getSystemService(Context.CAMERA_SERVICE) as CameraManager
+                    val chars = cm.getCameraCharacteristics(LgG6Main0Profile.CAMERA_ID)
+                    val profile = if (lgPhotoProcessing == "hq")
+                        LgG6PreviewProfile.PHOTO_HQ else LgG6PreviewProfile.PHOTO_FAST
+                    LgG6PhotoPreviewTuning.applyCameraX(options, chars, profile)
+                }
                 val vendorKeys = LgG6Main0VendorProbe.capabilities(ctx)
                 if (lgFocusPeaking && LgG6Main0Profile.VENDOR_PEAKING in vendorKeys) {
                     try {
@@ -568,6 +576,12 @@ class CameraXCapture(
     override fun setLgFocusPeaking(enabled: Boolean) {
         if (!isLgMain0) return
         lgFocusPeaking = enabled
+        applyAdvancedCaptureRequest()
+    }
+
+    override fun setLgPhotoProcessing(mode: String) {
+        if (!isLgMain0) return
+        lgPhotoProcessing = mode.takeIf { it in listOf("off", "fast", "hq") } ?: "off"
         applyAdvancedCaptureRequest()
     }
 
