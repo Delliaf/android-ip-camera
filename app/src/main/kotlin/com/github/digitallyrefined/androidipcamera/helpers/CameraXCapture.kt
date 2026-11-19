@@ -611,8 +611,17 @@ class CameraXCapture(
         val id = logicalCameraId?.takeIf { it in cm.cameraIdList }
             ?: cm.cameraIdList.firstOrNull { cm.getCameraCharacteristics(it).get(CameraCharacteristics.LENS_FACING) == want }
             ?: cm.cameraIdList.first()
-        cm.getCameraCharacteristics(id).get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES)
-            ?.maxWithOrNull(compareBy({ it.upper - it.lower }, { it.upper }))
+        val ranges = cm.getCameraCharacteristics(id).get(
+            CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES) ?: return null
+        if (lgH872Main0) {
+            val fps = androidx.preference.PreferenceManager.getDefaultSharedPreferences(ctx)
+                .getString("stream_fps", "20")?.toIntOrNull()?.coerceIn(1, 60) ?: 20
+            // Prefer the narrowest range whose bounds include target FPS;
+            // an AE min of 30 forces 30fps and increases heat on a static scene.
+            ranges.filter { it.lower <= fps && it.upper >= fps }
+                .minWithOrNull(compareBy({ it.upper - it.lower }, { it.upper }))
+                ?: ranges.minByOrNull { kotlin.math.abs(it.upper - fps) }
+        } else ranges.maxWithOrNull(compareBy({ it.upper - it.lower }, { it.upper }))
     } catch (e: Exception) { Log.e(TAG, "aeRange: ${e.message}"); null }
 
     override fun stop() {
