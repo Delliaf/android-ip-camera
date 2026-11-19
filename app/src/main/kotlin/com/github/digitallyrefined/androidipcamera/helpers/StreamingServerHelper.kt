@@ -1526,6 +1526,7 @@ class StreamingServerHelper(
         val lgTelemetry: Boolean,
         val lgProcessing: String,
         val lgPreviewProfile: String,
+        val lgExtendedIso: Boolean,
     )
 
     private data class DeviceInfo(
@@ -1638,6 +1639,7 @@ class StreamingServerHelper(
                 put("lgTelemetry", settings.lgTelemetry)
                 put("lgProcessing", settings.lgProcessing)
                 put("lgPreviewProfile", settings.lgPreviewProfile)
+                put("lgExtendedIso", settings.lgExtendedIso)
                 put("lgCaptureResult", if (settings.lgTelemetry &&
                     android.os.SystemClock.elapsedRealtime() - LgG6Main0Telemetry.lastUpdatedMs < 5000L)
                     LgG6Main0Telemetry.lastSummary else "telemetry disabled or waiting for new frames")
@@ -1832,6 +1834,7 @@ class StreamingServerHelper(
             lgTelemetry = prefs.getBoolean(LgG6Main0Profile.PREF_TELEMETRY, false),
             lgProcessing = prefs.getString("lg_main0_processing", "off") ?: "off",
             lgPreviewProfile = prefs.getString("lg_main0_preview_profile", "zsl") ?: "zsl",
+            lgExtendedIso = prefs.getBoolean(LgG6Main0Profile.PREF_EXTENDED_ISO, false),
         )
     }
 
