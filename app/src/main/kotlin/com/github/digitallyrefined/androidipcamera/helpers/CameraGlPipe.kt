@@ -64,6 +64,8 @@ class CameraGlPipe(
     @Volatile var roiZoom = 1f
     @Volatile var roiCenterX = .5f
     @Volatile var roiCenterY = .5f
+    /** Fill encoder frame by cropping the camera's full-size photo preview aspect ratio. */
+    @Volatile var cropToFillOutput = false
     /** Clockwise rotation (degrees) applied to the camera frame. This is the only rotation source:
      *  the surface transform's sensor orientation is deliberately ignored (quantised to 90° steps). */
     @Volatile var rotation: Int = 0
@@ -192,7 +194,7 @@ class CameraGlPipe(
         // Use externally-provided frame dimensions (from CameraX Preview use case) to
         // letterbox when the camera output aspect ratio differs from the pipe surface.
         var fw = frameWidth; var fh = frameHeight
-        if (fw > 0 && fh > 0) {
+        if (fw > 0 && fh > 0 && !cropToFillOutput) {
             // The quad is rotated [rot]° below, so the drawn content dimensions are swapped
             // for right-angle rotations — letterbox against the rotated shape.
             if (rot == 90 || rot == 270) {
@@ -250,7 +252,11 @@ class CameraGlPipe(
         GLES20.glEnableVertexAttribArray(aTex)
         GLES20.glUniformMatrix4fv(uST, 1, false, stMatrix, 0)
         GLES20.glUniform1f(uMirror, if (mirror) 1f else 0f)
-        val roi = RoiCrop.window(roiZoom, roiCenterX, roiCenterY)
+        val roi = if (cropToFillOutput) RoiCrop.windowForOutput(
+            roiZoom, roiCenterX, roiCenterY,
+            frameWidth.takeIf { it > 0 } ?: width,
+            frameHeight.takeIf { it > 0 } ?: height, outW, outH, rotation)
+        else RoiCrop.window(roiZoom, roiCenterX, roiCenterY)
         GLES20.glUniform4f(uCrop, roi.left, roi.top, roi.width, roi.height)
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
         GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, texId)
