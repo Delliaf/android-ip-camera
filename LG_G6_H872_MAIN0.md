@@ -1,5 +1,29 @@
 # LG G6 H872 — main camera ID0 implementation
 
+## Latest output format update (2026-11-19)
+
+**16:9 is optional, NOT the target default.** The user accepts native photo
+**4:3** and square **1:1**. The LG Main0 panel now exposes an atomic
+`Output aspect` selector: 4:3 → **960×720** (recommended for full
+4160×3120 input), 1:1 → **768×768**, and legacy optional 16:9 →
+960×540. The ISP4×/GPU4×/safe1× buttons honor that selector. This
+avoids an unnecessary second vertical crop when working with the
+13MP/4:3 sensor.
+
+With exact 4160×3120 capture, GPU 4× + 4:3 encodes ~1040×780
+native source pixels into 960×720, while GPU 4× + 1:1 encodes a
+~780×780 square into 768×768. These sizes assume the actual
+Camera2/CameraX PRIVATE/Preview stream is truly 4160×3120;
+observe negotiation in logcat before claiming quality.
+
+The GitHub Actions workflow may be triggered twice by internal PR
+and branch pushes. Internal same-repo pull-request jobs now skip
+(the branch-push job owns the build) and Gradle retries only
+transient Maven dependency-resolution failures. See
+`DEVELOPMENT_HISTORY.txt` for precise build SHA and run URLs.
+
+
+
 This file documents the Android 8 / API 26 **LG-H872** extensions of the experimental
 [feature/manual-camera-4k-stream](https://github.com/Delliaf/android-ip-camera/tree/feature/manual-camera-4k-stream)
 fork. This is **not** a firmware/SELinux modification. No LG or Qualcomm proprietary APKs,
@@ -65,7 +89,7 @@ unmodified generic controls. The H872 mode does not need root.
   This readback is substantially more useful than requested values alone.
 
 The three buttons set atomic A/B profiles: **ISP 4×**, **GPU 4×**, and
-**1× safe**. They request 960×540 output, 15 fps, 2 Mbps H.264, 90% MJPEG;
+**1× safe**. They now request 960×720 output by default (4:3), 15 fps, 2 Mbps H.264, 90% MJPEG;
 GPU profile requests 4160×2340 source and ISP profile uses the output-size
 camera source. Use the on-screen negotiated CameraX source/Preview dimensions
 and `CaptureResult` to tell what the device actually delivered.
@@ -165,7 +189,7 @@ with another key cannot necessarily be upgraded in-place.
 ### Controlled first experiment
 
 Use fixed focus, fixed shutter, stable lighting and a tripod. In
-H264 mode (NOT MJPEG), set Camera0, 960×540 encoded output, 15fps,
+H264 mode (NOT MJPEG), set Camera0, 960×720 encoded output (4:3), 15fps,
 ~2Mbps. Choose the **Direct Camera2** engine and switch between
 **VIDEO_REFERENCE (template3)** and **PHOTO_ZSL (template5)**.
 Compare actual frame detail and noise at equal framing. For the next
