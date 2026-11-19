@@ -103,6 +103,9 @@ class CameraXCapture(
     @Volatile private var manualFocus: Float? = null
     @Volatile private var manualIso: Int? = null
     @Volatile private var manualShutterUs: Long? = null
+    @Volatile private var preciseFocusDiopters: Float? = null
+    @Volatile private var postRawBoostPercent: Int? = null
+    @Volatile private var lastCachedFrameMs = 0L
     private val main = ContextCompat.getMainExecutor(ctx)
     private val analysisExec = Executors.newSingleThreadExecutor()
 
@@ -117,6 +120,7 @@ class CameraXCapture(
     @Volatile private var latestNv21AtMs = 0L
 
     private val logicalCameraId: String? = cameraId?.substringBefore(':')
+    private val lgH872Main0 get() = LgG6Main0Probe.isTarget(logicalCameraId)
     private val physicalCameraId: String? = cameraId
         ?.substringAfter(':', "")
         ?.takeIf { it.isNotBlank() }
@@ -146,6 +150,12 @@ class CameraXCapture(
                     .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888)
                 val analysisInterop = Camera2Interop.Extender(aBuilder)
                 physicalCameraId?.let { analysisInterop.setPhysicalCameraId(it) }
+                if (lgH872Main0 && androidx.preference.PreferenceManager.getDefaultSharedPreferences(ctx)
+                        .getBoolean("lg0_diagnostics", false)) {
+                    LgG6Main0Probe.logAdvertisedKeys(ctx, logicalCameraId)
+                    LgG6Main0Probe.clear()
+                    analysisInterop.setSessionCaptureCallback(LgG6Main0Probe.TelemetryCallback())
+                }
                 // Some legacy HALs (e.g. this phone's rear cam) stall the analysis stream unless an AE
                 // target FPS range is set. Use the WIDEST advertised range, not a fixed lock — AE stays
                 // fully auto (drops low for light in the dark, up to 30 in good light).
@@ -158,7 +168,11 @@ class CameraXCapture(
                         width = img.width; height = img.height
                         hasProducedFrame = true
                         lastFrameAtMs = SystemClock.elapsedRealtime()
-                        try {
+                        // The 4K CameraX surface stream does not need a full YUV->NV21 copy
+                        // on every frame. Keep a <=1.2-second-old still fallback, but sample
+                        // it only occasionally on the LG main camera to reduce heat and DRAM.
+                        if (!lgH872Main0 ||
+                            SystemClock.elapsedRealtime() - lastCachedFrameMs >= 1200L) try {
                             val crop = img.cropRect
                             val nv21 = synchronized(nv21Lock) {
                                 convertYUV420toNV21(img, nv21Buffer, nv21RowBuffer).also {
@@ -171,6 +185,7 @@ class CameraXCapture(
                             latestNv21 = nv21
                             latestNv21W = crop.width(); latestNv21H = crop.height()
                             latestNv21AtMs = System.currentTimeMillis()
+                            lastCachedFrameMs = SystemClock.elapsedRealtime()
                         } catch (e: Exception) { Log.e(TAG, "frame cache: ${e.message}") }
                         onFrame(img)
                     } }
@@ -421,6 +436,7 @@ class CameraXCapture(
             // Drop any manual-focus override, else the lingering CONTROL_AF_MODE_OFF
             // defeats the AF scan below.
             manualFocus = null
+            preciseFocusDiopters = null
             applyAdvancedCaptureRequest()
             val pt = SurfaceOrientedMeteringPointFactory(1f, 1f).createPoint(0.5f, 0.5f)
             cam.cameraControl.startFocusAndMetering(
@@ -439,13 +455,15 @@ class CameraXCapture(
         try {
             val info = Camera2CameraInfo.from(cam.cameraInfo)
             val options = CaptureRequestOptions.Builder()
-            manualFocus?.let { norm ->
-                val maxDiopters = info.getCameraCharacteristic(
-                    CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE) ?: 0f
+            val maxDiopters = info.getCameraCharacteristic(
+                CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE) ?: 0f
+            val focusD = if (lgH872Main0 && preciseFocusDiopters != null) {
+                preciseFocusDiopters!!.coerceIn(0f, maxDiopters)
+            } else manualFocus?.times(maxDiopters)
+            if (focusD != null && maxDiopters > 0f) {
                 options.setCaptureRequestOption(
                     CaptureRequest.CONTROL_AF_MODE, CameraMetadata.CONTROL_AF_MODE_OFF)
-                options.setCaptureRequestOption(
-                    CaptureRequest.LENS_FOCUS_DISTANCE, norm * maxDiopters)
+                options.setCaptureRequestOption(CaptureRequest.LENS_FOCUS_DISTANCE, focusD)
             }
             val iso = manualIso
             val shutterUs = manualShutterUs
@@ -457,14 +475,36 @@ class CameraXCapture(
                         CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)
                     val shutterRange = info.getCameraCharacteristic(
                         CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)
-                    val shutterNs = shutterUs.coerceIn(1L, 1_000_000L) * 1000L
+                    val shutterNs = if (lgH872Main0) {
+                        val fps = androidx.preference.PreferenceManager.getDefaultSharedPreferences(ctx)
+                            .getString("stream_fps", "20")?.toIntOrNull()?.coerceIn(1, 60) ?: 20
+                        val lo = shutterRange?.lower ?: 20651L
+                        val hi = shutterRange?.upper ?: 33_025_763_644L
+                        LgG6Main0Math.exposureForFps(shutterUs, fps, lo, hi)
+                    } else shutterUs.coerceIn(1L, 1_000_000L) * 1000L
                     options.setCaptureRequestOption(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
+                    if (lgH872Main0) {
+                        val fps = androidx.preference.PreferenceManager.getDefaultSharedPreferences(ctx)
+                            .getString("stream_fps", "20")?.toIntOrNull()?.coerceIn(1, 60) ?: 20
+                        options.setCaptureRequestOption(
+                            CaptureRequest.SENSOR_FRAME_DURATION, 1_000_000_000L / fps)
+                    }
                     options.setCaptureRequestOption(
                         CaptureRequest.SENSOR_SENSITIVITY,
                         isoRange?.let { iso.coerceIn(it.lower, it.upper) } ?: iso)
                     options.setCaptureRequestOption(
                         CaptureRequest.SENSOR_EXPOSURE_TIME,
                         shutterRange?.let { shutterNs.coerceIn(it.lower, it.upper) } ?: shutterNs)
+                    // This is post-RAW *digital gain*, not analog ISO 1600/3200.
+                    // Never request a boost on other phones or with AE enabled.
+                    if (lgH872Main0) postRawBoostPercent?.let { boost ->
+                        info.getCameraCharacteristic(
+                            CameraCharacteristics.CONTROL_POST_RAW_SENSITIVITY_BOOST_RANGE)?.let { range ->
+                            options.setCaptureRequestOption(
+                                CaptureRequest.CONTROL_POST_RAW_SENSITIVITY_BOOST,
+                                boost.coerceIn(range.lower, range.upper))
+                        }
+                    }
                 } else {
                     Log.w(TAG, "Manual sensor exposure unavailable for selected Camera2 camera")
                 }
@@ -478,6 +518,20 @@ class CameraXCapture(
     @OptIn(ExperimentalCamera2Interop::class)
     override fun setManualFocus(distance: Float) {
         manualFocus = distance.takeIf { it >= 0f }?.coerceIn(0f, 1f)
+        preciseFocusDiopters = null
+        applyAdvancedCaptureRequest()
+    }
+
+    override fun setManualFocusDiopters(diopters: Float?) {
+        if (!lgH872Main0) return
+        manualFocus = null
+        preciseFocusDiopters = diopters?.takeIf { it.isFinite() }?.coerceIn(0f, 10f)
+        applyAdvancedCaptureRequest()
+    }
+
+    override fun setPostRawBoost(percent: Int?) {
+        if (!lgH872Main0) return
+        postRawBoostPercent = percent?.takeIf { it in 100..3199 }
         applyAdvancedCaptureRequest()
     }
 
@@ -510,6 +564,7 @@ class CameraXCapture(
         try { provider?.unbindAll() } catch (_: Exception) {}
         try { analysisExec.shutdown() } catch (_: Exception) {}
         provider = null; camera = null; imageCapture = null
+        if (lgH872Main0) LgG6Main0Probe.clear()
     }
 
     companion object {
