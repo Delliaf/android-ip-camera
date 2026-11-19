@@ -640,6 +640,55 @@
               data-control="roi_y" data-badge="roiYVal">
             <small>H.264/RTSP crops on the GPU before encoding; MJPEG crops the full-resolution YUV frame before JPEG compression. 2× takes one quarter of the source area.</small>
 
+            <div id="lgG6Main0Panel" hidden style="margin:16px 0; padding:14px; border:1px solid #666; border-radius:8px;">
+              <p class="group-title" style="margin:0 0 8px;">LG G6 H872 · Main Camera ID0</p>
+              <small>LG camera0 only. Normal Camera2 works without root.</small>
+              <div style="display:flex; gap:6px; flex-wrap:wrap; margin:12px 0;">
+                <button id="lgPresetIsp" class="btn" type="button">ISP 4× · 960×540</button>
+                <button id="lgPresetGpu" class="btn" type="button">4K GPU ROI 4×</button>
+                <button id="lgPresetSafe" class="btn" type="button">1× safe</button>
+              </div>
+              <label for="lgMain0ZoomMode">Zoom mode — never combine ISP and GPU zoom</label>
+              <select id="lgMain0ZoomMode" data-control="lg_main0_zoom_mode">
+                <option value="isp">CameraX ISP sensor crop · recommended</option>
+                <option value="gpu">GPU ROI from camera source</option>
+                <option value="vendor">LG vendor zoom · experimental</option>
+              </select>
+              <label for="lgMain0Zoom">Main0 zoom <span class="val-badge" id="lgMain0ZoomVal">4×</span></label>
+              <input id="lgMain0Zoom" type="range" min="1" max="8" step="0.1" value="4"
+                 data-control="lg_main0_zoom" data-badge="lgMain0ZoomVal" data-fmt="suffix" data-suffix="×">
+              <label for="lgMain0FocusMode">Precise focus</label>
+              <select id="lgMain0FocusMode" data-control="lg_main0_focus_mode">
+                <option value="auto">Auto focus</option>
+                <option value="diopters">Manual lens focus (diopters)</option>
+              </select>
+              <div id="lgFocusExactControls" hidden>
+                <label for="lgMain0FocusDiopters">Focus distance (D) <span id="lgFocusMeters" class="val-badge">∞</span></label>
+                <input id="lgMain0FocusDiopters" type="number" min="0" max="10" step="0.05" value="0.25"
+                    data-control="lg_main0_focus_diopters">
+                <small>0D = infinity; 10D = near. Meters ~ 1/D are approximate.</small>
+              </div>
+              <label for="lgMain0Boost">Post-RAW gain (digital gain, NOT ISO)</label>
+              <select id="lgMain0Boost" data-control="lg_main0_postraw_boost">
+                <option value="100">100% (off)</option>
+                <option value="200">200% digital gain</option>
+                <option value="400">400% digital gain</option>
+              </select>
+              <label for="lgMain0Peaking">OEM focus peaking (experimental)</label>
+              <select id="lgMain0Peaking" data-control="lg_main0_peaking">
+                <option value="false">Off</option>
+                <option value="true">On (if vendor tag advertised)</option>
+              </select>
+              <label for="lgMain0Telemetry">Camera2 CaptureResult readback</label>
+              <select id="lgMain0Telemetry" data-control="lg_main0_telemetry">
+                <option value="false">Off (default)</option>
+                <option value="true">On — log ISO, shutter, focus, crop</option>
+              </select>
+              <small id="lgVendorInfo" aria-live="polite"></small>
+              <pre id="lgCaptureReadback" style="font-size:11px; white-space:pre-wrap; overflow-wrap:anywhere;">Readback disabled</pre>
+              <small>Vendor extensions may be unavailable to third-party apps. No root/HAL replacement is used.</small>
+            </div>
+
             <p class="group-title">Camera Control</p>
 
             <label for="resolutionSelect">Resolution <span class='val-badge' id='resolutionVal'>&mdash;</span></label>
@@ -1073,6 +1122,7 @@
     // Map control parameter names to the `lensSettings` keys used in `info.json`.
     function toLensKey(param) {
       if (!param) return null;
+      if (param.startsWith('lg_main0_')) return null;
       if (param === 'focus' || param === 'focus_distance') return 'focusDistance';
       if (param === 'snapshot_res') return 'snapshotRes';
       // Motion detection and RTSP/substream settings are global, not lens settings.
@@ -1091,6 +1141,46 @@
         return Number.isFinite(n) ? n : val;
       }
       return val;
+    }
+
+    function updateLgMain0Ui(data, loadValues) {
+      const cam = selectedCameraInfo();
+      const panel = getElById('lgG6Main0Panel');
+      if (!panel) return;
+      const available = cam?.lgMain0 === true;
+      panel.hidden = !available;
+      if (!available) return;
+      const settings = data?.settings || {};
+      const controls = {
+        lgMain0ZoomMode: settings.lgZoomMode,
+        lgMain0Zoom: settings.lgZoom,
+        lgMain0FocusMode: settings.lgFocusMode,
+        lgMain0FocusDiopters: settings.lgFocusDiopters,
+        lgMain0Boost: settings.lgPostRawBoost,
+        lgMain0Peaking: settings.lgPeaking === true ? 'true' : 'false',
+        lgMain0Telemetry: settings.lgTelemetry === true ? 'true' : 'false'
+      };
+      if (loadValues) for (const [id, val] of Object.entries(controls)) {
+        const el = getElById(id);
+        if (el && val !== undefined && val !== null) el.value = String(val);
+      }
+      const vendorOpt = getElById('lgMain0ZoomMode')?.querySelector('option[value="vendor"]');
+      if (vendorOpt) vendorOpt.disabled = !cam.lgVendorZoomAvailable;
+      const peak = getElById('lgMain0Peaking');
+      if (peak) peak.disabled = !cam.lgVendorPeakingAvailable;
+      const focusControls = getElById('lgFocusExactControls');
+      if (focusControls) focusControls.hidden = getElById('lgMain0FocusMode')?.value !== 'diopters';
+      const d = Number(getElById('lgMain0FocusDiopters')?.value);
+      const m = getElById('lgFocusMeters');
+      if (m) m.textContent = Number.isFinite(d) && d > 0 ? '~' + (1 / d).toFixed(2) + ' m' : '∞';
+      const badge = getElById('lgMain0ZoomVal');
+      if (badge) badge.textContent = (Number(getElById('lgMain0Zoom')?.value) || 4).toFixed(1) + '×';
+      const vendor = getElById('lgVendorInfo');
+      if (vendor) vendor.textContent = 'OEM zoom ' + (cam.lgVendorZoomAvailable ? 'advertised' : 'unavailable') +
+        ' · OEM peaking ' + (cam.lgVendorPeakingAvailable ? 'advertised' : 'unavailable') +
+        ' · Camera2 ID0 analog ISO 50–800 (not 3200)';
+      const readback = getElById('lgCaptureReadback');
+      if (readback && settings.lgCaptureResult) readback.textContent = settings.lgCaptureResult;
     }
 
     // Hide unsupported Camera2 manual-sensor options rather than sending settings
@@ -1242,6 +1332,15 @@
     }
 
     document.querySelectorAll('[data-control]').forEach(bindControl);
+    for (const [id, preset] of [['lgPresetIsp', 'isp4'], ['lgPresetGpu', 'gpu4'], ['lgPresetSafe', 'safe']]) {
+      getElById(id)?.addEventListener('click', () => {
+        sendControl('lg_main0_preset', preset);
+        setTimeout(() => loadDeviceInfo(true), 1200);
+      });
+    }
+    for (const id of ['lgMain0ZoomMode', 'lgMain0FocusMode', 'lgMain0FocusDiopters', 'lgMain0Zoom'])
+      getElById(id)?.addEventListener('input', () => updateLgMain0Ui({settings: {}}, false));
+
 
     function getUserScale() {
       const el = getElById('scale');
@@ -2098,6 +2197,7 @@
           }
           updateStatusOverlay(data);
           updateManualExposureUi();
+          updateLgMain0Ui(data, applySettings);
           const cap = data.captureFrame || {};
           const diag = getElById('captureDiagnostics');
           if (diag) {
