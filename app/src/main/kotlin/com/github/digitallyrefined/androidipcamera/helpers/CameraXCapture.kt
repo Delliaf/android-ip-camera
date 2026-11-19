@@ -440,6 +440,7 @@ class CameraXCapture(
             // Drop any manual-focus override, else the lingering CONTROL_AF_MODE_OFF
             // defeats the AF scan below.
             manualFocus = null
+            preciseFocusDiopters = null
             applyAdvancedCaptureRequest()
             val pt = SurfaceOrientedMeteringPointFactory(1f, 1f).createPoint(0.5f, 0.5f)
             cam.cameraControl.startFocusAndMetering(
