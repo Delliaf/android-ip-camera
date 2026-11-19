@@ -74,6 +74,7 @@ internal class LgG6Main0DirectCapture(
     private var iso: Int? = null
     private var shutterUs: Long? = null
     private var postRawGain = 100
+    private var allowExtendedIso = false
     private var profile = LgG6PreviewProfile.PHOTO_ZSL
     private val resultCallback = object : CameraCaptureSession.CaptureCallback() {
         private var n = 0
@@ -169,6 +170,7 @@ internal class LgG6Main0DirectCapture(
     }
     override fun setLgVendorZoom(zoom: Float?) { /* Vendor key is not advertised on H872 ID0. */ }
     override fun setLgPostRawBoost(percent: Int?) { mutate { postRawGain = percent ?: 100 } }
+    override fun setLgExtendedIso(enabled: Boolean) { mutate { allowExtendedIso = enabled } }
     override fun setLgFocusPeaking(enabled: Boolean) { /* Not advertised on the tested ID0 HAL. */ }
     override fun setLgPreviewProfile(profile: String) {
         mutate { this.profile = LgG6PreviewProfile.parse(profile) }
@@ -222,7 +224,9 @@ internal class LgG6Main0DirectCapture(
                         .coerceIn(expR.lower, minOf(expR.upper, maxFrame))
                     val frameNs = maxOf(desiredNs, exp + 1_000_000L).coerceAtMost(maxFrame)
                     b.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
-                    b.set(CaptureRequest.SENSOR_SENSITIVITY, iso!!.coerceIn(isoR.lower,isoR.upper))
+                    val targetIso = if (allowExtendedIso) iso!!.coerceIn(isoR.lower, 3200)
+                                    else iso!!.coerceIn(isoR.lower, isoR.upper)
+                    b.set(CaptureRequest.SENSOR_SENSITIVITY, targetIso)
                     b.set(CaptureRequest.SENSOR_EXPOSURE_TIME, exp)
                     b.set(CaptureRequest.SENSOR_FRAME_DURATION, frameNs)
                     val boostR = characteristics.get(
