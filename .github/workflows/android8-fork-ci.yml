@@ -7,6 +7,7 @@ on:
       - fix/onvif-go2rtc-telemetry
       - feature/lg-main0-auto-image-benchmark
       - fix/lg-g6-metrics-visible
+      - fix/web-controls-battery-temp-20261120
     paths-ignore:
       - 'DEVELOPMENT_HISTORY.txt'
       - 'AGENTS.md'
@@ -72,6 +73,7 @@ jobs:
           PY
           node --check /tmp/android-ip-camera-dashboard.js
           node scripts/test-metrics-dashboard.cjs
+          node scripts/test-web-controls.cjs
 
       - name: Test and build debug APK (retry transient dependency failures)
         run: |

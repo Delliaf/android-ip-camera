@@ -31,6 +31,14 @@ class DevicePerformanceMonitorTest {
         assertNull(CpuMath.thermalType("unknown"))
     }
 
+    @Test fun batteryTemperatureIsIndependentAndUsesTenthsOfCelsius() {
+        assertEquals(34.6, BatteryTemperatureMath.fromTenths(346)!!, 0.0001)
+        assertEquals(0.0, BatteryTemperatureMath.fromTenths(0)!!, 0.0001)
+        assertEquals(-1.0, BatteryTemperatureMath.fromTenths(-10)!!, 0.0001)
+        assertNull(BatteryTemperatureMath.fromTenths(-1))
+        assertNull(BatteryTemperatureMath.fromTenths(1500))
+    }
+
     @Test fun normalizeCommonAndroidThermalFormats() {
         assertEquals(42.5, CpuMath.thermalCelsius("42500\n")!!, 0.0001)
         assertEquals(42.5, CpuMath.thermalCelsius("425")!!, 0.0001)

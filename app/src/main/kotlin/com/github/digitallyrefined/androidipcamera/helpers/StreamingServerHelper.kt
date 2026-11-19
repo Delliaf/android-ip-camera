@@ -611,6 +611,66 @@ class StreamingServerHelper(
                 }
             }
 
+            // Parse control requests BEFORE the "/" dashboard. Previously an early
+            // 200 HTML return swallowed ALL legacy /?zoom=... /?focus_distance=...
+            // commands: browser clients silently treated the HTML as a success.
+            val controlQuery = if (uri.contains("?")) parseQueryParams(uri) else emptyMap()
+            val explicitControl = path == WebControlRoute.EXPLICIT_PATH
+            val legacyControl = WebControlRoute.isLegacyControl(path, controlQuery)
+            if (explicitControl || legacyControl) {
+                if (explicitControl && httpMethod != "POST") {
+                    writer.print("HTTP/1.1 405 Method Not Allowed\r\nAllow: POST\r\nConnection: close\r\n\r\n")
+                    writer.flush()
+                    socket.close()
+                    return
+                }
+                val values = if (explicitControl) {
+                    val key = controlQuery["key"]
+                    val value = controlQuery["value"]
+                    if (key == null || value == null) emptyMap() else mapOf(key to value)
+                } else WebControlRoute.filterLegacyControls(controlQuery)
+                val invalid = values.isEmpty() || values.any { (key, value) ->
+                    !WebControlRoute.validKey(key) || !WebControlRoute.validValue(value)
+                }
+                if (invalid) {
+                    writer.print("HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\n")
+                    writer.print("Cache-Control: no-store\r\nConnection: close\r\n\r\n")
+                    writer.print("{\"ok\":false,\"error\":\"Invalid control key or value\"}")
+                    writer.flush()
+                    socket.close()
+                    return
+                }
+
+                val timestamp = controlQuery["ts"]?.toLongOrNull() ?: 0L
+                try {
+                    if (!explicitControl && values.containsKey("resetCamera")) {
+                        resetCameraPreferences(values.getValue("resetCamera"))
+                    } else {
+                        values.forEach { (key, value) -> onControlCommand(key, value, timestamp) }
+                    }
+                    // "forwarded" deliberately does not claim a Camera2 request took
+                    // effect: camera HAL may accept/clamp/reject it asynchronously.
+                    val response = JSONObject().apply {
+                        put("ok", true)
+                        put("forwarded", true)
+                        put("keys", org.json.JSONArray(values.keys.toList()))
+                        put("timestamp", timestamp)
+                    }.toString()
+                    writer.print("HTTP/1.1 200 OK\r\nContent-Type: application/json; charset=utf-8\r\n")
+                    writer.print("Cache-Control: no-store\r\nContent-Length: ${response.toByteArray(Charsets.UTF_8).size}\r\n")
+                    writer.print("Connection: close\r\n\r\n")
+                    writer.print(response)
+                    writer.flush()
+                } catch (error: Exception) {
+                    onLog("Control forwarding failed: ${error.javaClass.simpleName}: ${error.message}")
+                    writer.print("HTTP/1.1 500 Internal Server Error\r\nContent-Type: application/json\r\n")
+                    writer.print("Connection: close\r\n\r\n{\"ok\":false,\"error\":\"Control handler failed\"}")
+                    writer.flush()
+                }
+                socket.close()
+                return
+            }
+
             // Handle Control UI and Commands
             if (path == "/" || path == "") {
                 val htmlResponse = try {
@@ -740,34 +800,6 @@ class StreamingServerHelper(
             // ---- Recorded files endpoints (Movies/AndroidIPCamera or the custom folder) ----
             if (fileManager.handleRequest(httpMethod, path, uri, headers, writer, outputStream)) {
                 try { socket.close() } catch (_: Exception) {}
-                return
-            }
-
-            if (uri.contains("?")) {
-                val params = parseQueryParams(uri)
-                val ts = params["ts"]?.toLongOrNull() ?: 0L // for ordering; 0 = none
-
-                // Support a single-shot reset command: ?resetCamera=<id>
-                val resetId = params["resetCamera"]
-                if (!resetId.isNullOrBlank()) {
-                    try {
-                        resetCameraPreferences(resetId)
-                    } catch (e: Exception) {
-                        onLog("Error resetting camera prefs for $resetId: ${e.message}")
-                    }
-                    writer.print("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\nOK")
-                    writer.flush()
-                    socket.close()
-                    return
-                }
-
-                params.forEach { (key, value) ->
-                    if (key == "ts") return@forEach
-                    onControlCommand(key, value, ts)
-                }
-                writer.print("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\nOK")
-                writer.flush()
-                socket.close()
                 return
             }
 
@@ -947,6 +979,7 @@ class StreamingServerHelper(
                     put("cpuScope", sample.cpuScope)
                     put("cpuNote", sample.cpuNote)
                     put("temperatureCelsius", sample.temperatureCelsius ?: JSONObject.NULL)
+                    put("batteryTemperatureCelsius", sample.batteryTemperatureCelsius ?: JSONObject.NULL)
                     put("temperatureSource", sample.temperatureSource)
                     put("temperatureNote", sample.temperatureNote)
                     put("metricsVersion", 2)
@@ -1572,6 +1605,7 @@ class StreamingServerHelper(
         val cpuPercent: Int,
         val cpuScope: String,
         val temperatureCelsius: Double?,
+        val batteryTemperatureCelsius: Double?,
         val temperatureSource: String,
         val settings: StreamSettings,
         val perCameraSettings: Map<String, Map<String, String>> = emptyMap(),
@@ -1635,6 +1669,7 @@ class StreamingServerHelper(
             put("cpuPercent", cpuPercent)
             put("cpuScope", cpuScope)
             put("temperatureCelsius", temperatureCelsius ?: JSONObject.NULL)
+            put("batteryTemperatureCelsius", batteryTemperatureCelsius ?: JSONObject.NULL)
             put("temperatureSource", temperatureSource)
             // Real negotiated sizes, rather than a desired 4K label.
             put("captureFrame", JSONObject().apply {
@@ -1815,6 +1850,7 @@ class StreamingServerHelper(
             cpuPercent = performance.cpuPercent,
             cpuScope = performance.cpuScope,
             temperatureCelsius = performance.temperatureCelsius,
+            batteryTemperatureCelsius = performance.batteryTemperatureCelsius,
             temperatureSource = performance.temperatureSource,
             settings = getStreamSettings(cameraList),
             perCameraSettings = perCamera,

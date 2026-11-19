@@ -9,7 +9,7 @@ const begin = source.indexOf('    function updateStatusOverlay(data) {');
 const finish = source.indexOf('    function loadDeviceInfo(', begin);
 assert(begin >= 0 && finish > begin, 'Dashboard metrics renderer missing');
 const js = source.slice(begin, finish);
-const ids = ['batteryStatus', 'wifiStatus', 'cpuStatus', 'temperatureStatus', 'statusOverlay'];
+const ids = ['batteryStatus', 'batteryTemperatureStatus', 'wifiStatus', 'cpuStatus', 'temperatureStatus', 'statusOverlay'];
 const elements = Object.fromEntries(ids.map(id => [
   id, {style: {display: 'none'}, textContent: '', innerHTML: '', title: ''}
 ]));
@@ -26,19 +26,25 @@ assert(visible('temperatureStatus'), 'Unavailable temperature must show explicit
 assert.match(elements.cpuStatus.textContent, /CPU/);
 assert.match(elements.temperatureStatus.textContent, /Temp/);
 assert.match(elements.temperatureStatus.title, /access denied/);
+assert.equal(elements.batteryTemperatureStatus.textContent, '🌡️ АКБ —');
+assert(visible('batteryTemperatureStatus'));
 assert(visible('statusOverlay'));
 
 render({batteryPercent: 91, wifiStrength: 45, cpuPercent: 27, cpuScope: 'app',
         cpuNote: 'process CPU only', temperatureCelsius: 38.4,
-        temperatureSource: 'Battery', temperatureNote: 'battery fallback'});
+        temperatureSource: 'Battery', temperatureNote: 'battery fallback',
+        batteryTemperatureCelsius: 37.2});
 assert.match(elements.cpuStatus.textContent, /App CPU 27%/);
 assert.match(elements.temperatureStatus.textContent, /Battery 38.4°C/);
 assert.equal(elements.temperatureStatus.title, 'battery fallback');
+assert.match(elements.batteryTemperatureStatus.textContent, /АКБ 37\.2°C/);
 
 render({cpuPercent: 58, cpuScope: 'system',
-        temperatureCelsius: 66.8, temperatureSource: 'SoC'});
+        temperatureCelsius: 66.8, temperatureSource: 'SoC',
+        batteryTemperatureCelsius: 36.6});
 assert.match(elements.cpuStatus.textContent, /CPU 58%/);
 assert.doesNotMatch(elements.cpuStatus.textContent, /App/);
 assert.match(elements.temperatureStatus.textContent, /SoC 66.8°C/);
+assert.match(elements.batteryTemperatureStatus.textContent, /АКБ 36\.6°C/);
 assert(visible('cpuStatus') && visible('temperatureStatus'));
 console.log('OK: metrics visible on warm-up, fallback and working CPU/SoC sensor states');

@@ -506,6 +506,7 @@
       <div id="statusOverlay" class="status-overlay" style="display: none;">
         <span id="wifiStatus" title="WiFi Strength">🛜 --%</span>
         <span id="batteryStatus" title="Battery Status">🔋 --%</span>
+        <span id="batteryTemperatureStatus" title="Battery temperature (separate from SoC)">🌡️ АКБ …</span>
         <span id="cpuStatus" title="Waiting for CPU measurements">🖥️ CPU …</span>
         <span id="temperatureStatus" title="Checking thermal sensors">🌡️ Temp …</span>
       </div>
@@ -515,6 +516,8 @@
     </div>
 
     <div class='controls-panel loading' id='controlsPanel'>
+      <div id="controlStatus" role="status" aria-live="polite"
+           style="display:none;font-size:12px;padding:6px 8px;overflow-wrap:anywhere;"></div>
       <div class='controls-panel-loading' aria-live='polite'>
         <div class='spinner'></div>
         <span>Loading settings…</span>
@@ -1149,14 +1152,48 @@
       return lastControlTs;
     }
 
-    // Centralized control sender used by data-control bindings and ad-hoc actions.
+    // Explicit control endpoint avoids the "/" dashboard route swallowing
+    // legacy /?zoom and /?focus_distance requests. Verify JSON instead of
+    // silently treating a 200-HTML dashboard response as a successful command.
     function sendControl(param, val) {
+      const status = getElById('controlStatus');
       try {
-        // Update local UI state immediately so the client reflects server-side
-        // changes without needing to re-fetch /info.json.
-        try { updateLocalLensSetting(param, val); } catch (_) { }
-        return fetch('/?' + encodeURIComponent(param) + '=' + encodeURIComponent(val) + '&ts=' + nextControlTs()).catch(() => { });
-      } catch (_) { /* swallow */ }
+        const url = '/control/set?key=' + encodeURIComponent(param) +
+          '&value=' + encodeURIComponent(val) + '&ts=' + nextControlTs();
+        return fetch(url, {method: 'POST', cache: 'no-store', credentials: 'same-origin'})
+          .then(async resp => {
+            const payload = await resp.json().catch(() => null);
+            if (!resp.ok || !payload || payload.ok !== true ||
+                !Array.isArray(payload.keys) || !payload.keys.includes(param)) {
+              throw new Error('HTTP ' + resp.status + ': command not acknowledged');
+            }
+            // Acknowledgement means forwarded to StreamingService, NOT that
+            // Camera2 applied the request. CaptureResult provides proof of that.
+            try { updateLocalLensSetting(param, val); } catch (_) {}
+            if (status) {
+              status.textContent = 'Команда передана: ' + param;
+              status.style.display = 'block';
+              status.style.color = '#238636';
+            }
+            return payload;
+          })
+          .catch(error => {
+            console.warn('Camera control failed:', param, error);
+            if (status) {
+              status.textContent = 'Ошибка управления (' + param + '): ' + error.message;
+              status.style.display = 'block';
+              status.style.color = '#b42318';
+            }
+            return null;
+          });
+      } catch (error) {
+        console.warn('Camera control exception:', param, error);
+        if (status) {
+          status.textContent = 'Ошибка команды: ' + error.message;
+          status.style.display = 'block';
+        }
+        return Promise.resolve(null);
+      }
     }
 
     // ---- Recording mode: on demand / notify only / motion clips / continuous ----
@@ -1644,6 +1681,7 @@
           console.warn('Device metrics request failed:', err);
           const cpu = getElById('cpuStatus');
           const temp = getElById('temperatureStatus');
+          const batteryTemp = getElById('batteryTemperatureStatus');
           if (cpu) {
             cpu.style.display = 'flex';
             cpu.textContent = '🖥️ CPU —';
@@ -1653,6 +1691,11 @@
             temp.style.display = 'flex';
             temp.textContent = '🌡️ Temp —';
             temp.title = '/metrics.json unavailable: ' + err.message;
+          }
+          if (batteryTemp) {
+            batteryTemp.style.display = 'flex';
+            batteryTemp.textContent = '🌡️ АКБ —';
+            batteryTemp.title = '/metrics.json unavailable: ' + err.message;
           }
           const overlay = getElById('statusOverlay');
           if (overlay) overlay.style.display = 'flex';
@@ -2307,6 +2350,7 @@
       const wifiEl = getElById('wifiStatus');
       const cpuEl = getElById('cpuStatus');
       const temperatureEl = getElById('temperatureStatus');
+      const batteryTempEl = getElById('batteryTemperatureStatus');
       const overlay = getElById('statusOverlay');
 
       if (batteryEl && typeof data.batteryPercent === 'number') {
@@ -2319,6 +2363,19 @@
             batteryEmoji = '🪫';
           }
           batteryEl.innerHTML = `${batteryEmoji} ${data.batteryPercent}%`;
+        }
+      }
+
+      if (batteryTempEl) {
+        batteryTempEl.style.display = 'flex';
+        if (typeof data.batteryTemperatureCelsius === 'number' &&
+            Number.isFinite(data.batteryTemperatureCelsius)) {
+          batteryTempEl.textContent = '🌡️ АКБ ' +
+            data.batteryTemperatureCelsius.toFixed(1) + '°C';
+          batteryTempEl.title = 'Battery temperature from ACTION_BATTERY_CHANGED; not CPU/SoC temperature';
+        } else {
+          batteryTempEl.textContent = '🌡️ АКБ —';
+          batteryTempEl.title = 'Battery temperature unavailable from Android';
         }
       }
 
@@ -2363,7 +2420,7 @@
       }
 
       if (overlay) {
-        const hasStatus = [batteryEl, wifiEl, cpuEl, temperatureEl]
+        const hasStatus = [batteryEl, batteryTempEl, wifiEl, cpuEl, temperatureEl]
           .some(el => el && el.style.display !== 'none');
         overlay.style.display = hasStatus ? 'flex' : 'none';
       }
