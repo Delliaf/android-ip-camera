@@ -693,6 +693,12 @@
                     data-control="lg_main0_focus_diopters">
                 <small>0D = infinity; 10D = near. Meters ~ 1/D are approximate.</small>
               </div>
+              <label for="lgMain0ExtendedIso">Experimental ISO above 800</label>
+              <select id="lgMain0ExtendedIso" data-control="lg_main0_extended_iso">
+                <option value="false">OFF — clamp manual ISO to reported 50–800</option>
+                <option value="true">Try 801–3200 (may be rejected by Camera HAL)</option>
+              </select>
+              <small>Auto CaptureResult showed ISO >1400, but this does NOT guarantee HAL accepts manual ISO >800. Compare requested and actual ISO; restore OFF if frames stop.</small>
               <label for="lgMain0Boost">Post-RAW gain (digital gain, NOT ISO)</label>
               <select id="lgMain0Boost" data-control="lg_main0_postraw_boost">
                 <option value="100">100% (off)</option>
@@ -1190,6 +1196,7 @@
         lgMain0Backend: settings.api === 'lg-main0-direct' ? 'lg-main0-direct' : 'camerax',
         lgMain0PreviewProfile: settings.lgPreviewProfile,
         lgMain0Processing: settings.lgProcessing,
+        lgMain0ExtendedIso: settings.lgExtendedIso === true ? 'true' : 'false',
         lgMain0ZoomMode: settings.lgZoomMode,
         lgMain0Zoom: settings.lgZoom,
         lgMain0FocusMode: settings.lgFocusMode,
@@ -1207,6 +1214,7 @@
       if (profile) profile.disabled = !direct;
       const processing = getElById('lgMain0Processing');
       if (processing) processing.disabled = direct;
+      updateManualExposureUi();
       const vendorOpt = getElById('lgMain0ZoomMode')?.querySelector('option[value="vendor"]');
       if (vendorOpt) vendorOpt.disabled = !cam.lgVendorZoomAvailable;
       const peak = getElById('lgMain0Peaking');
@@ -1242,13 +1250,15 @@
       const notice = getElById('manualExposureStatus');
       const iso = getElById('manualIso');
       const shutter = getElById('manualShutterUs');
+      const lgExtended = selectedCameraInfo()?.lgMain0 === true &&
+        getElById('lgMain0ExtendedIso')?.value === 'true';
       if (!mode || !panel) return;
       mode.disabled = !supported;
       panel.hidden = !supported || mode.value !== 'manual';
       if (supported) {
         if (iso) {
           iso.min = String(caps.isoMin || 25);
-          iso.max = String(caps.isoMax || 3200);
+          iso.max = String(lgExtended ? 3200 : (caps.isoMax || 800));
         }
         if (shutter) {
           shutter.min = String(caps.shutterMinUs || 1);
@@ -1428,7 +1438,8 @@
         setTimeout(() => loadDeviceInfo(true), 1200);
       });
     }
-    for (const id of ['lgMain0Backend', 'lgMain0Processing', 'lgMain0ZoomMode',
+    for (const id of ['lgMain0Backend', 'lgMain0Processing', 'lgMain0ExtendedIso',
+                      'lgMain0ZoomMode',
                       'lgMain0FocusMode', 'lgMain0FocusDiopters', 'lgMain0Zoom'])
       getElById(id)?.addEventListener('input', () => updateLgMain0Ui({settings: {}}, false));
 
