@@ -57,18 +57,20 @@ internal class DevicePerformanceMonitor(private val context: Context) {
         if (rootUnavailable || !allowRoot()) return null
         var process: java.lang.Process? = null
         return try {
-            process = ProcessBuilder("su", "-c", command).redirectErrorStream(true).start()
-            // Never block the web server if a root manager is prompting/denying.
-            if (!process.waitFor(900L, TimeUnit.MILLISECONDS)) {
+            val running = ProcessBuilder("su", "-c", command)
+                .redirectErrorStream(true).start()
+            process = running
+            // Never block an HTTP request waiting for root-manager approval.
+            if (!running.waitFor(900L, TimeUnit.MILLISECONDS)) {
                 rootUnavailable = true
-                process.destroyForcibly()
+                running.destroyForcibly()
                 return null
             }
-            if (process.exitValue() != 0) {
+            if (running.exitValue() != 0) {
                 rootUnavailable = true
                 null
             } else {
-                process.inputStream.bufferedReader().use { it.readText().take(16384) }
+                running.inputStream.bufferedReader().use { it.readText().take(16384) }
             }
         } catch (_: Exception) {
             rootUnavailable = true
