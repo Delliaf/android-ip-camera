@@ -8,6 +8,7 @@ on:
       - feature/lg-main0-auto-image-benchmark
       - fix/lg-g6-metrics-visible
       - fix/web-controls-battery-temp-20261120
+      - fix/lg-g6-noise-edge-sharpness-20261120
     paths-ignore:
       - 'DEVELOPMENT_HISTORY.txt'
       - 'AGENTS.md'
@@ -74,6 +75,7 @@ jobs:
           node --check /tmp/android-ip-camera-dashboard.js
           node scripts/test-metrics-dashboard.cjs
           node scripts/test-web-controls.cjs
+          node scripts/test-lg-isp-ui.cjs
 
       - name: Test and build debug APK (retry transient dependency failures)
         run: |
