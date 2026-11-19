@@ -38,5 +38,9 @@ interface CaptureBackend {
     fun setManualFocusDiopters(diopters: Float?) {}
     /** Digital gain after RAW, distinct from the sensor's ISO limit. Null disables it. */
     fun setPostRawBoost(percent: Int?) {}
+    /** Optional LG Camera0 test-only Camera2 sensor crop (no system modifications). */
+    fun setLg0SensorCrop(mode: String?, zoom: Float, x: Float, y: Float) {}
+    /** Optional vendor peaking request, only when ID0 advertises the key. */
+    fun setLg0VendorPeaking(enabled: Boolean) {}
     fun stop()
 }
