@@ -625,6 +625,7 @@
               <option value="match">Match encoded stream (stable)</option>
               <option value="2560x1440">Request 2560×1440 source</option>
               <option value="3840x2160">Request 3840×2160 (4K) source</option>
+              <option value="4160x2340">LG G6 main0: Request 4160×2340 Camera2 source</option>
             </select>
             <small>For the highest detail: output 1920×1080, request 4K source, then crop. Camera2 may negotiate a lower source size; Camera1 fallback is limited by its preview size. MJPEG uses the source ImageAnalysis frame when available.</small>
             <small id="captureDiagnostics" aria-live="polite">Captured source: waiting for camera frames</small>
@@ -667,6 +668,35 @@
             <label for="focusDistance">Focus <span class='val-badge' id='focusVal'>Auto</span></label>
             <input id="focusDistance" type='range' min='-0.05' max='1.0' step='0.05' value='-1'
               data-control='focus_distance' data-badge='focusVal' data-fmt='focus'>
+
+            <div id="lg0Controls" hidden style="margin:16px 0; padding:12px; border:1px solid var(--border, #666); border-radius:8px;">
+              <p class="group-title">LG G6 H872 · Main Camera ID 0</p>
+              <small>Controls below target only Camera2 ID0. ISO50–800 is analog; post-RAW boost is digital.</small>
+              <label for="lgZoomMode">Zoom strategy (exclusive)</label>
+              <select id="lgZoomMode" data-control="lg0_zoom_mode">
+                <option value="isp">CameraX ISP zoom (economical, test real detail)</option>
+                <option value="gpu">Full-size source + GPU ROI (verify actual 4160px source)</option>
+              </select>
+              <small id="lgZoomHint">ISP mode prevents GPU crop from multiplying the zoom.</small>
+              <label for="lgFocusDiopters">Manual focus (0–10 diopters; 0 = infinity)</label>
+              <input type="number" id="lgFocusDiopters" min="0" max="10" step="0.05" value="0" data-control="lg0_focus_diopters">
+              <button type="button" class="btn" data-control="lg0_focus_diopters" data-value="auto">Autofocus</button>
+              <small id="lgFocusHint">Actual lens position depends on HAL calibration.</small>
+              <label for="lgPostRawBoost">Experimental digital gain after RAW</label>
+              <select id="lgPostRawBoost" data-control="lg0_post_raw_boost">
+                <option value="off">Disabled</option>
+                <option value="100">1× (100%)</option>
+                <option value="200">2× (200%)</option>
+                <option value="400">4× (400%)</option>
+              </select>
+              <small>Boost does not unlock genuine analog ISO 1600 or 3200.</small>
+              <label for="lg0Diagnostics">CaptureResult telemetry</label>
+              <select id="lg0Diagnostics" data-control="lg0_diagnostics">
+                <option value="false">Off</option>
+                <option value="true">On: vendor tag probe + actual ISO/AF/ROI</option>
+              </select>
+              <small id="lg0Readback">Enable readback to check actual sensor settings.</small>
+            </div>
 
             <p class="group-title">Post Processing</p>
 
@@ -1075,6 +1105,8 @@
       if (!param) return null;
       if (param === 'focus' || param === 'focus_distance') return 'focusDistance';
       if (param === 'snapshot_res') return 'snapshotRes';
+      if (param === 'lg0_diagnostics') return null;
+      if (param.startsWith('lg0_')) return 'lg' + param.slice(4).replace(/_([a-z])/g, (m, c) => c.toUpperCase()).replace(/^([a-z])/, (m) => m.toUpperCase());
       // Motion detection and RTSP/substream settings are global, not lens settings.
       if (param === 'motion_detection_enabled' || param === 'motion_sensitivity' ||
         param === 'motion_record_stop_delay' || param === 'recording_mode' ||
@@ -1122,6 +1154,50 @@
         : 'Manual ISO/shutter unavailable on this camera (Camera2 MANUAL_SENSOR not advertised).';
     }
 
+    let lg0Info = null;
+    function updateLg0Ui() {
+      const panel = getElById('lg0Controls');
+      if (!panel) return;
+      const main0 = lg0Info?.target === true;
+      panel.hidden = !main0;
+      const opt = getElById('captureResolution')?.querySelector('option[value="4160x2340"]');
+      if (opt) opt.hidden = !main0;
+      if (!main0) return;
+      const settings = selectedCameraInfo()?.lensSettings || {};
+      const mode = getElById('lgZoomMode');
+      if (mode && settings.lgZoomMode) mode.value = settings.lgZoomMode;
+      const gpu = mode?.value === 'gpu';
+      for (const id of ['roiZoom', 'roiX', 'roiY']) {
+        const el = getElById(id);
+        if (el) el.disabled = !gpu;
+      }
+      const cameraZoom = getElById('zoom');
+      if (cameraZoom) cameraZoom.disabled = gpu;
+      const hint = getElById('lgZoomHint');
+      if (hint) hint.textContent = gpu
+        ? 'GPU mode: camera zoom is locked to 1×. ROI is cropped before H.264 encoding.'
+        : 'ISP mode: GPU ROI is disabled; this prevents 4× camera + 4× GPU = 16× cropping.';
+      const focus = getElById('lgFocusDiopters');
+      if (focus && settings.lgFocusDiopters !== 'auto' && settings.lgFocusDiopters != null)
+        focus.value = settings.lgFocusDiopters;
+      const focusHint = getElById('lgFocusHint');
+      if (focusHint) focusHint.textContent = settings.lgFocusDiopters === 'auto'
+        ? 'Autofocus enabled' : 'Requested lens position: ' + (settings.lgFocusDiopters || '0') + ' D';
+      const boost = getElById('lgPostRawBoost');
+      if (boost && settings.lgPostRawBoost) boost.value = settings.lgPostRawBoost;
+      const diag = getElById('lg0Diagnostics');
+      if (diag) diag.value = String(!!lg0Info?.diagnostics);
+      const msg = getElById('lg0Readback');
+      if (msg) {
+        const r = lg0Info?.readback;
+        msg.textContent = r?.valid
+          ? 'Actual ISO=' + r.iso + ', shutter=' + (r.shutterNs / 1000000).toFixed(2) +
+            ' ms, focus=' + r.focusDiopters + ' D, frame=' + (r.frameNs / 1000000).toFixed(2) +
+            ' ms, crop=' + r.crop + ', digital boost=' + r.postRawBoostPercent + '%'
+          : 'No camera0 CaptureResult yet; enable telemetry and start streaming.';
+      }
+    }
+
     // Keep the client-side `cameraList` in sync with recently-sent control values.
     function updateLocalLensSetting(param, val) {
       const key = toLensKey(param);
@@ -1133,6 +1209,7 @@
       // Reflect the change in the visible controls without re-sending to server
       try { applyStreamSettings(cam.lensSettings); } catch (_) { }
       if (param === 'exposure_mode') updateManualExposureUi();
+      if (param.startsWith('lg0_')) updateLg0Ui();
     }
 
     function formatControlValue(el) {
@@ -2075,6 +2152,7 @@
         .then(res => res.json())
         .then(data => {
           cameraList = Array.isArray(data.cameras) ? data.cameras : [];
+          lg0Info = data.lgMain0 || null;
           // Visibility of the Substream section follows the RTSP setting even on periodic polls.
           applySubstreamSettings(data.settings);
           if (applySettings) applyStreamSettings(data.settings);
@@ -2098,6 +2176,7 @@
           }
           updateStatusOverlay(data);
           updateManualExposureUi();
+          updateLg0Ui();
           const cap = data.captureFrame || {};
           const diag = getElById('captureDiagnostics');
           if (diag) {
