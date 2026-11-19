@@ -31,3 +31,29 @@
 - Этап 1: проверить методы существующих камер и реализовать NR/EDGE.
 - Этап 2: запустить CI на точном SHA; если не проходит — исправить.
 - Этап 3: установить APK на телефон, снять сравнение при одном освещении/ISO/focus/zoom/шторке, получить фактический NR/EDGE и оценить качество вместе с FPS.
+
+
+## 2026-11-20 — реализация завершена и CI успешно прошёл
+
+- **Кодовая ветка:** `fix/lg-g6-noise-edge-sharpness-20261120`, отдельный [draft PR #7](https://github.com/Delliaf/android-ip-camera/pull/7), база PR #6.
+- **Точный функциональный SHA:** `9764aea7df873e91d5ef5d83b3a276cb5296c926`.
+- **Версия:** `0.18.0-delliaf.10` / versionCode 190, Android 8+, ARM64-V8A only.
+- **CI:** https://github.com/Delliaf/android-ip-camera/actions/runs/44635287805 — `completed / success` на точно том же функциональном SHA, что и HEAD feature-ветки на момент записи.
+- **Успешные CI шаги:** `Validate embedded browser JavaScript` (включая `scripts/test-lg-isp-ui.cjs` и старые UI control/thermal tests), `Test and build debug APK` (`testDebugUnitTest`, `assembleDebug`), `Verify APK contains only arm64-v8a JNI libraries`, `Upload installable debug APK`.
+- **Artifact:** `android-ip-camera-android8-debug`, GitHub artifact ID `14583651422`, ZIP 11,254,553 bytes. Debug APK находится внутри ZIP, не выдавать имя архива за самостоятельный apk.
+- Реальные изменения: `LgG6IspModes.kt`, `CaptureBackend.kt`, `LgG6Main0DirectCapture.kt`, `CameraXCapture.kt`, `StreamingService.kt`, `StreamingServerHelper.kt`, `LgG6Main0VendorProbe.kt`, `index.html`, тесты `LgG6IspModesTest.kt`, `scripts/test-lg-isp-ui.cjs`, `app/build.gradle` и CI.
+- В Direct сначала создаётся заданный ZSL/RECORD/PREVIEW request, затем проверяются advertised стандартные Camera2 NR/EDGE и записываются **отдельные** значения. В CameraX NR/EDGE обновляются в общем request builder, не стирая ISO/shutter/focus. Строка `auto` ничего не навязывает и сохраняет старый профиль.
+- `LGG6Camera0Result` выводит `requestNR` и `requestEDGE` рядом с фактическим `NR` и `EDGE`; пользователь сможет выявить отклонение запроса.
+- По архиву предыдущего 73-кейсового YUV теста сравнены кейсы #28–31: `NR=4 EDGE=3` LaplacianVariance ~790, `NR=4 EDGE=1/2` ~3980 при похожих экспозициях. Визуальный приватный анализ показал усиление **шума вместе с контурами**. Нельзя выдавать эту разницу за выигрыш реального разрешения. Подробности: [доменный технический файл](../../workstreams/camera-lg-g6/2026-11-20-noise-edge-sharpness-diagnostics.md).
+- **На реальном LG-H872 новая .10 ещё НЕ проверялась.** Команды управления и физический сенсор NR/EDGE могут вести себя иначе; для подтверждения требуется установка пользователем и фактический `CaptureResult`.
+
+## Обязательные последующие испытания
+
+1. Установить артефакт новой версии, в веб-интерфейсе открыть `/?v=10`, выбрать Camera0, **Direct Camera2 ZSL**.
+2. Включить LG Camera0 CaptureResult telemetry, зафиксировать ISO/shutter/focus/zoom/NR/EDGE; сравнить NR=auto, minimal, fast, off при EDGE неизменном и затем EDGE=off,fast,hq при NR неизменном.
+3. Для одинаковых профилей сохранить сцены/видео в приватном хранилище; по журналу подтвердить `requestNR=requested`, `NR=actual` и соответствие режиму. Проверить CameraX отдельно.
+4. Если проблема резкости сохраняется, изучить 100мс экспозицию/ISO2750, реальную скорость 10fps и переключения CameraX с TimeoutException; тестовое YUV 13MP не равно обычному PRIVATE source960×720.
+5. Не смешивать сетевые TLS Handshake failed с применением ISP; если пользователь использует HTTP на TLS-порту, исправить протокол/порт и проверить ONVIF/go2rtc отдельно.
+6. Не публиковать сырой ZIP или приватные изображения/адреса в GitHub.
+
+**Status:** `CI-passed` / APK-built. Device verified: **NO**. PR #7 оставить draft до аппаратных тестов.
