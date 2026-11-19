@@ -21,8 +21,8 @@ android {
         applicationId "com.github.digitallyrefined.androidipcamera"
         minSdk 24
         targetSdk 34
-        // LG-H872 is aarch64. Keep APK + OpenTunnel JNI in a single architecture.
-        ndk { abiFilters 'arm64-v8a' }
+        // The release split is arm64-only; Rust builds only aarch64 native code.
+        // Do NOT also set ndk.abiFilters: AGP rejects overlapping ABI splits.
         versionCode 181
         versionName "0.18.0-delliaf.1"
 
