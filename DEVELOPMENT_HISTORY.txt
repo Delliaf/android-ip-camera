@@ -483,3 +483,38 @@ NEXT WORK:
   Fix any Kotlin/unit tests, update this history with exact result SHA,
   APK link and status. Keep PR #3 draft until physical go2rtc smoke test.
 ==============================================================================
+
+
+VERIFIED CI RESULT — go2rtc / CPU telemetry, 2026-11-19 15:30:56 UTC
+==============================================================================
+GitHub Actions run:
+  https://github.com/Delliaf/android-ip-camera/actions/runs/44554725993
+Outcome: COMPLETED SUCCESS
+Exact TESTED FUNCTIONAL COMMIT:
+  60e41c041981a32b05e7e8468be73d8d568b2bbc
+Passing steps:
+  - JavaScript syntax validation for the embedded web dashboard
+  - :app:testDebugUnitTest + :app:assembleDebug (Gradle/Java17/Rust)
+  - Verify no non-arm64 native libraries inside debug APK
+  - Upload installable debug artifact
+Artifact:
+  android-ip-camera-android8-debug
+  artifact id 14545036925
+  https://github.com/Delliaf/android-ip-camera/actions/runs/44554725993
+  artifact compressed ZIP size 11,207,022 bytes (NOT unpacked APK size)
+Package version: 0.18.0-delliaf.5 (versionCode 185), Android 8+;
+  ARM64-V8A ONLY.
+
+Only the GO2RTC_ONVIF_AND_METRICS.md and DEVELOPMENT_HISTORY.txt docs
+were changed AFTER this tested code SHA. Changes to AGENTS.md are
+also documentation-only. Hence the successful build tests all functional
+ONVIF, metrics and settings changes in PR #3.
+
+No real-device go2rtc session has yet been verified, so keep the PR
+DRAFT; the diagnosis of a transport mismatch is supported by source code,
+but exact H872 network behavior and CPU-temperature availability require
+device logs. To use with go2rtc on an isolated/trusted LAN: turn OFF only
+"ONVIF over HTTPS (TLS)" in Settings > RTSP / ONVIF, restart,
+then configure onvif://PHONE_IP:8000. Turning OFF ONVIF HTTPS must NOT
+disable the main web TLS or RTSPS.
+==============================================================================
