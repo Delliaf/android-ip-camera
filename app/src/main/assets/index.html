@@ -676,6 +676,8 @@
               <select id="lgZoomMode" data-control="lg0_zoom_mode">
                 <option value="isp">CameraX ISP zoom (economical, test real detail)</option>
                 <option value="gpu">Full-size source + GPU ROI (verify actual 4160px source)</option>
+                <option value="sensor">Experimental direct sensor SCALER_CROP_REGION (CameraX zoom locked 1×)</option>
+                <option value="vendor">Experimental LG OEM sensor crop + vendor Float zoom (key-probed only)</option>
               </select>
               <small id="lgZoomHint">ISP mode prevents GPU crop from multiplying the zoom.</small>
               <label for="lgFocusDiopters">Manual focus (0–10 diopters; 0 = infinity)</label>
@@ -690,6 +692,12 @@
                 <option value="400">4× (400%)</option>
               </select>
               <small>Boost does not unlock genuine analog ISO 1600 or 3200.</small>
+              <label for="lg0Peaking">Experimental LG OEM focus peaking</label>
+              <select id="lg0Peaking" data-control="lg0_peaking">
+                <option value="off">Off (default)</option>
+                <option value="on">On (requires camera0 vendor tag; overlay may be LG-only)</option>
+              </select>
+              <small id="lg0VendorStatus">Vendor tag support unknown until camera0 is queried.</small>
               <label for="lg0Diagnostics">CaptureResult telemetry</label>
               <select id="lg0Diagnostics" data-control="lg0_diagnostics">
                 <option value="false">Off</option>
@@ -1166,17 +1174,24 @@
       const settings = selectedCameraInfo()?.lensSettings || {};
       const mode = getElById('lgZoomMode');
       if (mode && settings.lgZoomMode) mode.value = settings.lgZoomMode;
+      const vendorOption = mode?.querySelector('option[value="vendor"]');
+      if (vendorOption) vendorOption.disabled = !lg0Info?.vendorZoomAdvertised;
       const gpu = mode?.value === 'gpu';
-      for (const id of ['roiZoom', 'roiX', 'roiY']) {
+      const sensor = mode?.value === 'sensor' || mode?.value === 'vendor';
+      for (const id of ['roiX', 'roiY']) {
         const el = getElById(id);
-        if (el) el.disabled = !gpu;
+        if (el) el.disabled = !gpu && !sensor;
       }
+      const roiZoom = getElById('roiZoom');
+      if (roiZoom) roiZoom.disabled = !gpu;
       const cameraZoom = getElById('zoom');
       if (cameraZoom) cameraZoom.disabled = gpu;
       const hint = getElById('lgZoomHint');
       if (hint) hint.textContent = gpu
         ? 'GPU mode: camera zoom is locked to 1×. ROI is cropped before H.264 encoding.'
-        : 'ISP mode: GPU ROI is disabled; this prevents 4× camera + 4× GPU = 16× cropping.';
+        : sensor
+          ? 'Experimental Camera2 crop: CameraX zoom locked to 1×; use camera Zoom slider and ROI X/Y. Check CaptureResult.'
+          : 'ISP mode: GPU ROI is disabled; this prevents 4× camera + 4× GPU = 16× cropping.';
       const focus = getElById('lgFocusDiopters');
       if (focus && settings.lgFocusDiopters !== 'auto' && settings.lgFocusDiopters != null)
         focus.value = settings.lgFocusDiopters;
@@ -1185,6 +1200,16 @@
         ? 'Autofocus enabled' : 'Requested lens position: ' + (settings.lgFocusDiopters || '0') + ' D';
       const boost = getElById('lgPostRawBoost');
       if (boost && settings.lgPostRawBoost) boost.value = settings.lgPostRawBoost;
+      const peak = getElById('lg0Peaking');
+      if (peak) {
+        peak.disabled = !lg0Info?.vendorPeakingAdvertised;
+        if (settings.lgPeaking) peak.value = settings.lgPeaking;
+      }
+      const vendorStatus = getElById('lg0VendorStatus');
+      if (vendorStatus) vendorStatus.textContent =
+        'Camera0 vendor tags: LG zoom=' + (!!lg0Info?.vendorZoomAdvertised) +
+        ', focus peaking=' + (!!lg0Info?.vendorPeakingAdvertised) +
+        '. These flags show key advertisement, not confirmed behavior.';
       const diag = getElById('lg0Diagnostics');
       if (diag) diag.value = String(!!lg0Info?.diagnostics);
       const msg = getElById('lg0Readback');
