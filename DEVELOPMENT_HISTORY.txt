@@ -736,3 +736,37 @@ MUST STILL VERIFY ON LG H872:
   - exact successful CI run ID/SHA/artifact MUST be appended after build.
   - no private logs/images uploaded to public repository.
 ==============================================================================
+
+
+VERIFIED CI — LG G6 METRICS-VISIBLE PATCH, 2026-11-19
+==============================================================================
+EXACT TESTED FUNCTIONAL SHA:
+  5853755367ae8dc99c338851b2de22214ec8b07a
+GITHUB ACTIONS RUN — COMPLETED SUCCESS:
+  https://github.com/Delliaf/android-ip-camera/actions/runs/44591663439
+ARTIFACT:
+  android-ip-camera-android8-debug
+  artifact id: 14563998935
+  compressed ZIP: 11,246,077 bytes; contains installable debug APK.
+  Version: 0.18.0-delliaf.8, Android 8+, ARM64-V8A only.
+GREEN STEPS:
+  Embedded dashboard JavaScript and scripts/test-metrics-dashboard.cjs
+  :app:testDebugUnitTest + :app:assembleDebug
+  Native JNI architecture verification: lib/arm64-v8a only
+  APK uploaded to GitHub Actions Artifacts
+
+All later changes to DEVELOPMENT_HISTORY.txt / PR body are documentation
+only. No change to tested application bytecode.
+DO NOT CLAIM REAL LG-H872 HARDWARE VALIDATION. User must install and confirm:
+1. Open browser at /?v=8 (bypass old cached HTML).
+2. CPU & temperature badges now visible, or explicit CPU ... / Temp --.
+3. Open authenticated /metrics.json: cpuPercent, cpuScope, cpuNote,
+   temperatureCelsius, temperatureSource, temperatureNote, metricsVersion=2.
+4. Wait >5 seconds for second CPU delta sample; if /proc/stat is denied,
+   app-process CPU fallback should be labeled 'App CPU'.
+5. For rooted phone, optionally enable Settings > Device Monitoring >
+   Use root for CPU / SoC temperature when needed; approve root if prompted.
+6. Check named SoC sensor vs battery label; NEVER call battery CPU temp.
+7. If still missing, export /metrics.json JSON + sanitized adb logcat; do
+   not commit raw device secrets or camera scene images to public repo.
+==============================================================================
