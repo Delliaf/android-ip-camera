@@ -62,7 +62,14 @@ class MjpegStreamingEncoder(
                 ?: phys?.let { prefs.getString(prefix + it, null) })?.toFloatOrNull()
             return v ?: default
         }
-        return nv21RoiRect(w, h, read("roi_zoom_", 1f), read("roi_x_", .5f), read("roi_y_", .5f))
+        // In LG0 ISP/vendor zoom modes Camera2 has already cropped its output.
+        // Never perform another 4x in JPEG mode (would make an accidental 16x).
+        val zoom = if (LgG6Main0Profile.isTarget(camId)) {
+            if (LgG6Main0Profile.zoomMode(prefs.getString(LgG6Main0Profile.PREF_ZOOM_MODE, "isp")) == "gpu")
+                (prefs.getString(LgG6Main0Profile.PREF_ZOOM, "4.0")?.toFloatOrNull() ?: 4f)
+            else 1f
+        } else read("roi_zoom_", 1f)
+        return nv21RoiRect(w, h, zoom, read("roi_x_", .5f), read("roi_y_", .5f))
     }
 
     private var lastFrameTime = 0L
