@@ -67,6 +67,8 @@ internal class LgG6Main0Telemetry : CameraCaptureSession.CaptureCallback() {
                 " requestISO=" + (if (aeOn) "ignored(template=$requestedISO)" else "$requestedISO") +
                 " requestShutterNs=" + (if (aeOn) "ignored(template=$requestedShutter)" else "$requestedShutter") +
                 " requestCrop=" + request.get(CaptureRequest.SCALER_CROP_REGION) +
+                " requestNR=" + request.get(CaptureRequest.NOISE_REDUCTION_MODE) +
+                " requestEDGE=" + request.get(CaptureRequest.EDGE_MODE) +
                 " postRawBoost=" + result.get(CaptureResult.CONTROL_POST_RAW_SENSITIVITY_BOOST)
             lastSummary = summary
             lastUpdatedMs = SystemClock.elapsedRealtime()
