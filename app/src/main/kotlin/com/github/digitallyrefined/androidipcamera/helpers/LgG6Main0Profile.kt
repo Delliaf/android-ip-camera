@@ -15,6 +15,7 @@ internal object LgG6Main0Profile {
     const val PREF_POST_RAW_BOOST = "lg_main0_postraw_boost"
     const val PREF_PEAKING = "lg_main0_peaking"
     const val PREF_TELEMETRY = "lg_main0_telemetry"
+    const val PREF_EXTENDED_ISO = "lg_main0_extended_iso"
     const val VENDOR_ZOOM = "com.lge.camera.zoom.ratio"
     const val VENDOR_PEAKING = "com.lge.camera.focus_peaking"
 
