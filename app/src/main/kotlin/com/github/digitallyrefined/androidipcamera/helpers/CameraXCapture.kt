@@ -125,7 +125,7 @@ class CameraXCapture(
     @Volatile private var latestNv21AtMs = 0L
 
     private val logicalCameraId: String? = cameraId?.substringBefore(':')
-    private val lgH872Main0 get() = LgG6Main0Probe.isTarget(logicalCameraId)
+    private val lgH872Main0 get() = LgG6Main0Probe.isTarget(cameraId)
     private val physicalCameraId: String? = cameraId
         ?.substringAfter(':', "")
         ?.takeIf { it.isNotBlank() }
