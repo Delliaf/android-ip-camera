@@ -1183,8 +1183,19 @@ class StreamingService : LifecycleService() {
             read("roi_y_", .5f).coerceIn(0f, 1f))
     }
 
+    private fun lgMain0ZoomMode(p: SharedPreferences): String =
+        LgG6Main0Profile.zoomMode(p.getString(LgG6Main0Profile.PREF_ZOOM_MODE, "isp"))
+
+    private fun lgMain0Zoom(p: SharedPreferences): Float =
+        (p.getString(LgG6Main0Profile.PREF_ZOOM, "4.0")?.toFloatOrNull() ?: 4f).coerceIn(1f, 8f)
+
     private fun applyRoiToPipes() {
-        val (zoom, x, y) = roiConfig()
+        val (originalZoom, x, y) = roiConfig()
+        val p = PreferenceManager.getDefaultSharedPreferences(this)
+        // Never stack a 4x sensor crop and a 4x texture crop into an accidental 16x.
+        val zoom = if (LgG6Main0Profile.isTarget(camId())) {
+            if (lgMain0ZoomMode(p) == "gpu") lgMain0Zoom(p) else 1f
+        } else originalZoom
         for (pipe in listOfNotNull(glPipe, cameraXGlPipe)) {
             pipe.roiZoom = zoom
             pipe.roiCenterX = x
@@ -1512,7 +1523,11 @@ class StreamingService : LifecycleService() {
                 val pipe = CameraGlPipe(enc.inputSurface!!, enc.width, enc.height, fpsCoerced, standardBuffer = true).also {
                     it.mirror = readMirrorPref()
                     it.rotation = quantizedRotation(readRotatePref())
-                    val (zoom, x, y) = roiConfig()
+                    val (originalZoom, x, y) = roiConfig()
+                    val p = PreferenceManager.getDefaultSharedPreferences(this@StreamingService)
+                    val zoom = if (LgG6Main0Profile.isTarget(camId())) {
+                        if (lgMain0ZoomMode(p) == "gpu") lgMain0Zoom(p) else 1f
+                    } else originalZoom
                     it.roiZoom = zoom; it.roiCenterX = x; it.roiCenterY = y
                     it.start()
                     cameraXGlPipe = it
@@ -1759,14 +1774,38 @@ class StreamingService : LifecycleService() {
             p.contains("zoom_$phys") -> p.getString("zoom_$phys", null)
             else -> null
         }
-        zoom?.toFloatOrNull()?.let { b.setZoom(it) }
+        if (LgG6Main0Profile.isTarget(id)) {
+            val lgZoom = lgMain0Zoom(p)
+            when (lgMain0ZoomMode(p)) {
+                "isp" -> { b.setLgVendorZoom(null); b.setZoom(lgZoom) }
+                "gpu" -> { b.setLgVendorZoom(null); b.setZoom(1f) }
+                "vendor" -> {
+                    // Dangerous/nonstandard mode is opt-in only. Never leave CameraX
+                    // standard zoom active while applying the LG vendor request.
+                    b.setZoom(1f)
+                    b.setLgVendorZoom(lgZoom)
+                }
+            }
+            b.setLgPostRawBoost(p.getString(LgG6Main0Profile.PREF_POST_RAW_BOOST, "100")
+                ?.toIntOrNull()?.takeIf { it > 100 })
+            b.setLgFocusPeaking(p.getBoolean(LgG6Main0Profile.PREF_PEAKING, false))
+            applyRoiToPipes()
+        } else zoom?.toFloatOrNull()?.let { b.setZoom(it) }
 
         val focus = when {
             p.contains("focus_$id") -> p.getString("focus_$id", null)
             p.contains("focus_$phys") -> p.getString("focus_$phys", null)
             else -> null
         }
-        focus?.toFloatOrNull()?.let { b.setManualFocus(it) }
+        if (LgG6Main0Profile.isTarget(id) &&
+            p.getString(LgG6Main0Profile.PREF_FOCUS_MODE, "auto") == "diopters") {
+            val d = p.getString(LgG6Main0Profile.PREF_FOCUS_DIOPTERS, "0.25")
+                ?.toFloatOrNull() ?: .25f
+            b.setFocusDiopters(d.coerceIn(0f, 10f))
+        } else {
+            focus?.toFloatOrNull()?.let { b.setManualFocus(it) }
+            if (focus == null && LgG6Main0Profile.isTarget(id)) b.setFocusDiopters(null)
+        }
         // Restore manual sensor settings after opening the camera; nulls restore AE.
         val mode = p.getString("manual_exposure_mode_$id",
             p.getString("manual_exposure_mode_$phys", "auto"))
@@ -2208,12 +2247,50 @@ class StreamingService : LifecycleService() {
                         if (mode == "manual") shutter else null)
                 }
             }
+            "lg_main0_zoom_mode", "lg_main0_zoom", "lg_main0_focus_mode",
+            "lg_main0_focus_diopters", "lg_main0_postraw_boost", "lg_main0_peaking",
+            "lg_main0_telemetry" -> {
+                if (!LgG6Main0Profile.isTarget(id)) return
+                val saved = when (key) {
+                    "lg_main0_zoom_mode" -> value.takeIf { it in listOf("isp", "gpu", "vendor") } ?: return
+                    "lg_main0_zoom" -> value.toFloatOrNull()?.takeIf { it.isFinite() && it in 1f..8f }
+                        ?.toString() ?: return
+                    "lg_main0_focus_mode" -> value.takeIf { it == "auto" || it == "diopters" } ?: return
+                    "lg_main0_focus_diopters" -> value.toFloatOrNull()
+                        ?.takeIf { it.isFinite() && it in 0f..10f }?.toString() ?: return
+                    "lg_main0_postraw_boost" -> value.toIntOrNull()?.takeIf { it in 100..400 }
+                        ?.toString() ?: return
+                    else -> value.takeIf { it == "true" || it == "false" } ?: return
+                }
+                val editor = prefs.edit()
+                if (key == "lg_main0_peaking" || key == "lg_main0_telemetry")
+                    editor.putBoolean(key, saved.toBoolean())
+                else editor.putString(key, saved)
+                if (key == "lg_main0_focus_mode" && saved == "auto") {
+                    editor.remove("focus_$id")
+                    if (physicalId.isNotBlank() && physicalId != id) editor.remove("focus_$physicalId")
+                }
+                editor.apply()
+                if (key == "lg_main0_telemetry") {
+                    // Session CaptureCallback is attached during CameraX use-case binding.
+                    if (captureRunning && localRecorder?.isRecording != true) debouncedStartCamera()
+                } else launchMain {
+                    val active = backend
+                    if (active != null) applyStored(active)
+                    applyRoiToPipes()
+                }
+            }
             "zoom" -> {
                 val z = value.toFloatOrNull() ?: return
                 val zStr = String.format(Locale.US, "%.1f", z)
                 prefs.edit().putString("zoom_$id", zStr).apply()
                 if (physicalId.isNotBlank() && physicalId != id) prefs.edit().putString("zoom_$physicalId", zStr).apply()
-                launchMain { backend?.setZoom(z) }
+                launchMain {
+                    if (LgG6Main0Profile.isTarget(id)) {
+                        prefs.edit().putString(LgG6Main0Profile.PREF_ZOOM, z.coerceIn(1f,8f).toString()).apply()
+                        applyStored(backend ?: return@launchMain)
+                    } else backend?.setZoom(z)
+                }
             }
             "focus_distance" -> {
                 val f = value.toFloatOrNull() ?: return
@@ -2224,6 +2301,8 @@ class StreamingService : LifecycleService() {
                     prefs.edit().putString("focus_$id", f.coerceIn(0f, 1f).toString()).apply()
                     if (physicalId.isNotBlank() && physicalId != id) prefs.edit().putString("focus_$physicalId", f.coerceIn(0f, 1f).toString()).apply()
                 }
+                if (LgG6Main0Profile.isTarget(id))
+                    prefs.edit().putString(LgG6Main0Profile.PREF_FOCUS_MODE, "auto").apply()
                 launchMain { backend?.setManualFocus(f) }
             }
             "snapshot_res" -> {
