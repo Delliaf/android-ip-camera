@@ -2386,6 +2386,12 @@ class StreamingService : LifecycleService() {
                     else applyRoiToPipes()
                 }
             }
+            "fps" -> {
+                val fps = value.toIntOrNull()?.takeIf { it in 1..60 } ?: return
+                prefs.edit().putString("stream_fps", fps.toString()).apply()
+                // Refresh the encoder, Camera2 frame duration and AE target FPS range.
+                if (captureRunning && localRecorder?.isRecording != true) debouncedStartCamera()
+            }
             "stream_bitrate_kbps" -> {
                 val kbps = value.toIntOrNull()
                 if (value != "auto" && (kbps == null || kbps !in 250..100_000)) return
