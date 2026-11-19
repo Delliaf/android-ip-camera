@@ -48,10 +48,11 @@ class LgBenchmarkPlanTest {
         val dark = ByteArray(w*h) { 0 }
         val darkMetrics = LgBenchmarkImaging.metrics(dark, w, h)
         assertEquals(100.0, darkMetrics.blackClippingPercent, 0.0001)
-        val checkerboard = ByteArray(w*h) { i ->
-            if ((i / w + i % w) % 2 == 0) 0 else 255.toByte()
+        // 2px stripes vary across the metric sampler's 2px grid.
+        val stripes = ByteArray(w*h) { i ->
+            if ((i % w / 2) % 2 == 0) 0 else 255.toByte()
         }
-        val sharp = LgBenchmarkImaging.metrics(checkerboard, w, h)
+        val sharp = LgBenchmarkImaging.metrics(stripes, w, h)
         assertTrue(sharp.edgeEnergy > 0)
         assertTrue(sharp.laplacianVariance > 0)
     }
