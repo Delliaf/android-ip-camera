@@ -1193,7 +1193,16 @@
       panel.hidden = !main0;
       const opt = getElById('captureResolution')?.querySelector('option[value="4160x2340"]');
       if (opt) opt.hidden = !main0;
-      if (!main0) return;
+      if (!main0) {
+        for (const id of ['roiZoom', 'roiX', 'roiY', 'zoom', 'focusDistance']) {
+          const el = getElById(id);
+          if (el) el.disabled = false;
+        }
+        return;
+      }
+      // On LG camera0 use the exact diopter control, not the old normalized slider.
+      const legacyFocus = getElById('focusDistance');
+      if (legacyFocus) legacyFocus.disabled = true;
       const settings = selectedCameraInfo()?.lensSettings || {};
       const mode = getElById('lgZoomMode');
       if (mode && settings.lgZoomMode) mode.value = settings.lgZoomMode;
