@@ -306,4 +306,55 @@ NEXT DEVICE TESTS:
    because logcat alone cannot prove a missing color transform.
 
 
+
+IMPORTANT FOLLOW-UP — 2026-11-19, ROOT CAUSE: DIRECT AE FPS RANGE
+---------------------------------------------------------------------------
+Inspected the LG-H872 Camera0 metadata in the uploaded ZIP and compared our
+code paths. The actual Camera2 CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES list
+includes [15,15], [20,20], [2,24], [24,24], [2,30], [30,30].
+LG Direct Camera2 originally used:
+    ranges?.firstOrNull { it.lower <= fps && it.upper >= fps }
+At 15 fps this picks [15,15] and restricts AUTO exposure to ~66.7ms.
+CameraX instead uses:
+    ranges?.maxWithOrNull(compareBy({ it.upper - it.lower }, { it.upper }))
+which picks the much wider [2,30], permitting longer night exposures.
+THIS IS A MAJOR LIKELY CAUSE of the user's very dark Direct picture, and
+is more concrete than assuming that a manual ISO 800 ceiling is the cause.
+No claim that it is the only cause; OEM ISP tone processing still differs.
+The test archive shows actual AUTO ISO2728 @ 66.667ms while direct fixed
+range; the wide-range fix must be tested physically and FPS tradeoff noted.
+
+NEW CODE:
+- 2d67f2b3 / 42ff8a17: pure LgG6AeFps.select() and JVM tests, asserting
+  adaptive 15 fps selects [2,30] while fixed profile selects [15,15].
+- 59f355e9: LG Direct repeating AUTO request now chooses adaptive wide
+  range by default; fixed remains an explicit A/B fallback option.
+- 5365dff5 / 97998a2b: persist Direct AE FPS mode and expose via info.json.
+- 2f60a514: browser select Adaptive (recommended) vs Fixed target FPS.
+- bc8769f6: CaptureResult log includes requested/actual AE FPS ranges.
+- aa288fb6: versionCode 184, versionName 0.18.0-delliaf.4.
+
+MOST RECENT FUNCTIONAL COMMIT FOR BUILD VERIFICATION:
+    aa288fb6509e28f21544acd16c4cdb50a8dcfe8e
+GitHub Actions:
+    https://github.com/Delliaf/android-ip-camera/actions/runs/44549683759
+    https://github.com/Delliaf/android-ip-camera/actions/runs/44549683761
+These were pending/in progress when first recorded. Check CONCLUSION and
+ARM64 artifact before recommending installation; newer docs-only commits
+are intentionally ignored by CI.
+
+NEW DEVICE A/B:
+- Select Camera ID0, Direct Camera2, AUTO exposure, Auto focus, output 4:3.
+- Choose Adaptive 2..30 AE with gamma=1.00 and capture actual ISO,
+  exposure duration, aeFpsReq and aeFpsActual; compare night brightness.
+- Repeat Fixed 15 FPS with gamma=1.00 in identical lighting.
+- Gamma 0.80/0.65 ONLY if adaptive AE still looks too dark; compare frame
+  drops, CPU and grain. Do not confuse display correction with ISO or SNR.
+- For manual ISO>800 opt-in, use manual AE with a fixed 20ms shutter, check
+  actual result vs requested and monitor automatic safe fallback.
+- Keep source and output shape 4:3 or 1:1 to avoid 16:9 loss.
+- Report if QCOM AVC -1010 recurs after new 960x720 auto default and
+  codec fallback; log exact encoder requested/aligned dimensions.
+
+
 ==============================================================================
