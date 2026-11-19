@@ -1151,7 +1151,13 @@
       if (!panel) return;
       const available = cam?.lgMain0 === true;
       panel.hidden = !available;
-      if (!available) return;
+      if (!available) {
+        for (const id of ['roiX', 'roiY']) {
+          const el = getElById(id);
+          if (el) el.disabled = false;
+        }
+        return;
+      }
       const settings = data?.settings || {};
       const controls = {
         lgMain0ZoomMode: settings.lgZoomMode,
