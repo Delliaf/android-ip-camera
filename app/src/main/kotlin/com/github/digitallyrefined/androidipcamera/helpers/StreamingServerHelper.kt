@@ -1516,6 +1516,13 @@ class StreamingServerHelper(
         val streamBitrateKbps: String,
         val mjpegQuality: String,
         val captureResolution: String,
+        val lgZoomMode: String,
+        val lgZoom: String,
+        val lgFocusMode: String,
+        val lgFocusDiopters: String,
+        val lgPostRawBoost: String,
+        val lgPeaking: Boolean,
+        val lgTelemetry: Boolean,
     )
 
     private data class DeviceInfo(
@@ -1537,6 +1544,12 @@ class StreamingServerHelper(
                         put("label", camera.label)
                         put("hasFlash", camera.hasFlash)
                         put("sensorOrientation", camera.sensorOrientation)
+                        put("lgMain0", LgG6Main0Profile.isTarget(camera.id))
+                        if (LgG6Main0Profile.isTarget(camera.id)) {
+                            val vendor = LgG6Main0VendorProbe.capabilities(context)
+                            put("lgVendorZoomAvailable", LgG6Main0Profile.VENDOR_ZOOM in vendor)
+                            put("lgVendorPeakingAvailable", LgG6Main0Profile.VENDOR_PEAKING in vendor)
+                        }
                         put("manualExposure", JSONObject().apply {
                             put("supported", camera.manualSensor)
                             put("isoMin", camera.isoMin)
@@ -1612,6 +1625,16 @@ class StreamingServerHelper(
                 put("streamBitrateKbps", settings.streamBitrateKbps)
                 put("mjpegQuality", settings.mjpegQuality)
                 put("captureResolution", settings.captureResolution)
+                put("lgZoomMode", settings.lgZoomMode)
+                put("lgZoom", settings.lgZoom)
+                put("lgFocusMode", settings.lgFocusMode)
+                put("lgFocusDiopters", settings.lgFocusDiopters)
+                put("lgPostRawBoost", settings.lgPostRawBoost)
+                put("lgPeaking", settings.lgPeaking)
+                put("lgTelemetry", settings.lgTelemetry)
+                put("lgCaptureResult", if (settings.lgTelemetry &&
+                    android.os.SystemClock.elapsedRealtime() - LgG6Main0Telemetry.lastUpdatedMs < 5000L)
+                    LgG6Main0Telemetry.lastSummary else "telemetry disabled or waiting for new frames")
             })
             put("appVersion", context.packageManager.getPackageInfo(context.packageName, 0).versionName.orEmpty())
         }.toString()
@@ -1793,6 +1816,13 @@ class StreamingServerHelper(
             streamBitrateKbps = prefs.getString("stream_bitrate_kbps", "auto") ?: "auto",
             mjpegQuality = prefs.getString("mjpeg_quality", "auto") ?: "auto",
             captureResolution = prefs.getString("capture_resolution", "match") ?: "match",
+            lgZoomMode = prefs.getString(LgG6Main0Profile.PREF_ZOOM_MODE, "isp") ?: "isp",
+            lgZoom = prefs.getString(LgG6Main0Profile.PREF_ZOOM, "4.0") ?: "4.0",
+            lgFocusMode = prefs.getString(LgG6Main0Profile.PREF_FOCUS_MODE, "auto") ?: "auto",
+            lgFocusDiopters = prefs.getString(LgG6Main0Profile.PREF_FOCUS_DIOPTERS, "0.25") ?: "0.25",
+            lgPostRawBoost = prefs.getString(LgG6Main0Profile.PREF_POST_RAW_BOOST, "100") ?: "100",
+            lgPeaking = prefs.getBoolean(LgG6Main0Profile.PREF_PEAKING, false),
+            lgTelemetry = prefs.getBoolean(LgG6Main0Profile.PREF_TELEMETRY, false),
         )
     }
 
