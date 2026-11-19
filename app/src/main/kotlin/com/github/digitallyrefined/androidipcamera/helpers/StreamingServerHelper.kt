@@ -1518,6 +1518,7 @@ class StreamingServerHelper(
         val mjpegQuality: String,
         val captureResolution: String,
         val lgZoomMode: String,
+        val lgOutputShape: String,
         val lgZoom: String,
         val lgFocusMode: String,
         val lgFocusDiopters: String,
@@ -1631,6 +1632,7 @@ class StreamingServerHelper(
                 put("mjpegQuality", settings.mjpegQuality)
                 put("captureResolution", settings.captureResolution)
                 put("lgZoomMode", settings.lgZoomMode)
+                put("lgOutputShape", settings.lgOutputShape)
                 put("lgZoom", settings.lgZoom)
                 put("lgFocusMode", settings.lgFocusMode)
                 put("lgFocusDiopters", settings.lgFocusDiopters)
@@ -1826,6 +1828,7 @@ class StreamingServerHelper(
             mjpegQuality = prefs.getString("mjpeg_quality", "auto") ?: "auto",
             captureResolution = prefs.getString("capture_resolution", "match") ?: "match",
             lgZoomMode = prefs.getString(LgG6Main0Profile.PREF_ZOOM_MODE, "isp") ?: "isp",
+            lgOutputShape = prefs.getString("lg_main0_output_shape", "4:3") ?: "4:3",
             lgZoom = prefs.getString(LgG6Main0Profile.PREF_ZOOM, "4.0") ?: "4.0",
             lgFocusMode = prefs.getString(LgG6Main0Profile.PREF_FOCUS_MODE, "auto") ?: "auto",
             lgFocusDiopters = prefs.getString(LgG6Main0Profile.PREF_FOCUS_DIOPTERS, "0.25") ?: "0.25",
