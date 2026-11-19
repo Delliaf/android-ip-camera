@@ -21,6 +21,8 @@ android {
         applicationId "com.github.digitallyrefined.androidipcamera"
         minSdk 24
         targetSdk 34
+        // LG-H872 is aarch64. Keep APK + OpenTunnel JNI in a single architecture.
+        ndk { abiFilters 'arm64-v8a' }
         versionCode 181
         versionName "0.18.0-delliaf.1"
 
@@ -73,8 +75,8 @@ android {
                 abi {
                     enable enableAbiSplits
                     reset()
-                    include "armeabi-v7a", "arm64-v8a"
-                    universalApk true
+                    include "arm64-v8a"
+                    universalApk false
                 }
             }
         }
@@ -131,7 +133,7 @@ tasks.whenTaskAdded { task ->
 }
 
 // ---------------------------------------------------------------------------
-// Rust OpenTunnel client (JNI, arm64-v8a + armeabi-v7a)
+// Rust OpenTunnel client (JNI, arm64-v8a only)
 // ---------------------------------------------------------------------------
 // Locate the Rust toolchain explicitly instead of trusting PATH. A Gradle daemon
 // keeps the environment of whichever process started it, so a daemon that
@@ -165,12 +167,6 @@ def rustAbis = [
         abi: "arm64-v8a",
         rustTarget: "aarch64-linux-android",
         clang: "aarch64-linux-android${rustApiLevel}-clang",
-    ],
-    [
-        taskSuffix: "Armv7",
-        abi: "armeabi-v7a",
-        rustTarget: "armv7-linux-androideabi",
-        clang: "armv7a-linux-androideabi${rustApiLevel}-clang",
     ],
 ]
 
