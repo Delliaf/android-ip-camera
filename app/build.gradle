@@ -256,11 +256,7 @@ tasks.register("buildOpenTunnelNative") {
     dependsOn rustTaskNames
 }
 
-// Cargo serializes access to its shared target directory; keep the builds ordered.
-tasks.named("buildOpenTunnelNativeArmv7").configure {
-    mustRunAfter "buildOpenTunnelNativeArm64"
-}
-
+// Only the arm64 Rust target is configured for this LG G6 build.
 tasks.matching { it.name == "preBuild" }.configureEach {
     dependsOn "buildOpenTunnelNative"
 }
