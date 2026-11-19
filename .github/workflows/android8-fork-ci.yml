@@ -4,9 +4,19 @@ on:
   push:
     branches:
       - feature/manual-camera-4k-stream
+    paths-ignore:
+      - 'DEVELOPMENT_HISTORY.txt'
+      - 'AGENTS.md'
+      - 'LG_G6_H872_MAIN0.md'
+      - 'FORK_ANDROID8.md'
   pull_request:
     branches:
       - main
+    paths-ignore:
+      - 'DEVELOPMENT_HISTORY.txt'
+      - 'AGENTS.md'
+      - 'LG_G6_H872_MAIN0.md'
+      - 'FORK_ANDROID8.md'
   workflow_dispatch:
 
 concurrency:
