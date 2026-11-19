@@ -2268,6 +2268,8 @@ class StreamingService : LifecycleService() {
             }
             "lg0_zoom_mode" -> {
                 if (!isLgH872Main0() || id == null || value !in listOf("isp", "gpu", "sensor", "vendor")) return
+                if (value == "vendor" && !LgG6Main0Probe.advertisedRequestKey(
+                        this, "0", LgG6Main0Probe.VENDOR_ZOOM)) return
                 prefs.edit().putString("lg0_zoom_mode_$id", value).apply()
                 launchMain { applyLgMain0Zoom() }
             }
