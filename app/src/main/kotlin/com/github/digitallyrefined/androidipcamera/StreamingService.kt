@@ -2399,7 +2399,8 @@ class StreamingService : LifecycleService() {
                     .apply()
                 if (localRecorder?.isRecording != true) debouncedStartCamera()
             }
-            "lg_main0_zoom_mode", "lg_main0_zoom", "lg_main0_direct_gamma", "lg_main0_focus_mode",
+            "lg_main0_zoom_mode", "lg_main0_zoom", "lg_main0_direct_gamma",
+            "lg_main0_direct_ae_fps", "lg_main0_focus_mode",
             "lg_main0_focus_diopters", "lg_main0_postraw_boost", "lg_main0_peaking",
             "lg_main0_telemetry", "lg_main0_processing", "lg_main0_preview_profile",
             "lg_main0_extended_iso" -> {
@@ -2413,6 +2414,8 @@ class StreamingService : LifecycleService() {
                         ?.toString() ?: return
                     "lg_main0_direct_gamma" -> value.toFloatOrNull()
                         ?.takeIf { it.isFinite() && it in .45f..1.5f }?.toString() ?: return
+                    "lg_main0_direct_ae_fps" -> value.takeIf {
+                        it == "adaptive" || it == "fixed" } ?: return
                     "lg_main0_focus_mode" -> value.takeIf { it == "auto" || it == "diopters" } ?: return
                     "lg_main0_focus_diopters" -> value.toFloatOrNull()
                         ?.takeIf { it.isFinite() && it in 0f..10f }?.toString() ?: return
