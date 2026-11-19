@@ -1518,6 +1518,14 @@
 
     loadDeviceInfo(true).finally(() => initStreamUi());
     setInterval(() => loadDeviceInfo(false), 60000);
+    // Debug telemetry updates every few seconds, not once a minute.
+    // Avoid the extra polling cost unless the user explicitly enabled it.
+    setInterval(() => {
+      if (lg0Info?.target && lg0Info?.diagnostics) loadDeviceInfo(false);
+    }, 5000);
+    getElById('lg0Diagnostics')?.addEventListener('change', () => {
+      setTimeout(() => loadDeviceInfo(false), 1600);
+    });
 
     function stopMjpegStream() {
       if (mjpegAbort) {
