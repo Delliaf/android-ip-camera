@@ -10,9 +10,9 @@ if(-not (Get-Command adb -ErrorAction SilentlyContinue)){throw 'adb missing from
 if(((adb get-state 2>&1 | Out-String).Trim()) -ne 'device'){throw 'ADB connection not authorized'}
 $dir=Join-Path ([Environment]::GetFolderPath('Desktop')) ("LG-G6-main0-"+(Get-Date -Format yyyyMMdd-HHmmss))
 New-Item -ItemType Directory -Force -Path $dir | Out-Null
-function Capture([string]$name,[string[]]$args){
+function Capture([string]$name,[string[]]$adbArgs){
   Write-Host $name
-  try { (& adb @args 2>&1 | Out-String) | Set-Content -LiteralPath (Join-Path $dir $name) -Encoding UTF8 }
+  try { (& adb @adbArgs 2>&1 | Out-String) | Set-Content -LiteralPath (Join-Path $dir $name) -Encoding UTF8 }
   catch { $_ | Out-String | Set-Content -LiteralPath (Join-Path $dir $name) }
 }
 Capture 'device.txt' @('devices','-l')
