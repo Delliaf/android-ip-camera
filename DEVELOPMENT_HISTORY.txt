@@ -157,4 +157,66 @@ another failed fetching Maven dependencies; release reproducibility passed.
 Action planned this session: strengthen CI transient retry, avoid duplicate
 internal PR builds, switch LG 4x preset to 4:3 output, offer 1:1 shape selector,
 test both, update PR and this file with final run SHAs and links.
+SESSION UPDATE — 2026-11-19, AFTER USER'S BUILD FAILURE / ASPECT REQUEST
+---------------------------------------------------------------------------
+USER SAID: one build failed; 16:9 not required, 4:3 or 1:1 is acceptable;
+keep detailed persistent GitHub development history for any future handoff.
+
+FINDINGS AND FIXES (COMMITTED, NOT YET DEVICE-VERIFIED):
+- Confirmed same SHA 55b243cc had a passing debug APK/unit-test build
+  (44529567261), passing reproducible release (44529578809), AND one
+  FAILED duplicate internal PR debug job (44529577864) caused by Gradle
+  Maven/Google repository download errors. Thus NOT a proven Kotlin compile bug.
+- 6c2c6800: created this DEVELOPMENT_HISTORY.txt persistent plain text log.
+- 64d75e05: added AGENTS.md directing all future agents to this file.
+- 2685836b: Main0 shape chooser mapping and LG presets now use 4:3
+  960x720 by default; allow square 768x768 and optional 16:9 960x540.
+- 66c91e65: /info.json returns persisted lgOutputShape.
+- d2e61f14: browser selector, photo-source explanation and corrected
+  ISP4x/GPU4x buttons. User selection works for both CameraX and direct
+  Camera2, because GPU crop geometry derives from encoded output size.
+- 54f2fa30: added 4:3 zoom4 1040x780 and square zoom4 780x780
+  ROI geometry, edge-panning, and 1x full-source tests. Still retains
+  historical optional 16:9 tests.
+- cac1fa10: scripts/ci-gradle-retry.sh, retries only dependency resolution
+  errors; Kotlin/Gradle/unit-test failures still fail immediately.
+- 76fd3d87: Android 8 Actions skip duplicate in-repo pull_request
+  jobs when branch push handles build, detect transient Maven problems,
+  avoid unzip/grep SIGPIPE in arm64 native-library verification.
+- be97fd68: reproducible release builds also get bounded Maven retries.
+- 3b3fdf2a: LG_G6_H872_MAIN0.md documentation correct 4:3 default.
+- 503b584c: bump versionCode 182 / versionName 0.18.0-delliaf.2;
+  debug output filename explicitly arm64-v8a.
+- 0e84c500: Android Actions skip doc-only commits.
+- 4363d93a: release Actions on feature branch (instead of redundant
+  internal PR run), skip docs-only, latest functional workflow update.
+- PR #1 remains DRAFT, main unchanged, user hardware test still pending.
+
+LATEST TARGET SOURCE CODE SHA AT TIME OF THIS UPDATE:
+  4363d93a40f3a486bc93f85a7cef4c1d255c5804
+NEW CI RUNS (CHECK FINAL STATUS BEFORE RECOMMENDING AN APK):
+  debug   https://github.com/Delliaf/android-ip-camera/actions/runs/44541674580
+  release https://github.com/Delliaf/android-ip-camera/actions/runs/44541674723
+Both were IN PROGRESS when last checked; do not claim success until actual
+run conclusion is SUCCESS. A subsequent pure journal commit should not
+cause APK recompilation because paths-ignore was added to workflows.
+The new version should be tested on actual H872 for input 4160x3120
+and 4000x3000 acceptance; 4:3 vs square photo-quality and ZSL A/B
+remain unverified.
+
+NEXT STEPS:
+1. Inspect exact latest code SHA, GitHub runs/artifacts, identify any
+   failure and fix it. Use returned job logs, not prior chat claims.
+2. If debug succeeds, download arm64 debug ZIP artifact; confirm .apk,
+   package name and install/upgrade semantics on LG-H872.
+3. Test GPU 4x native 4:3 960x720 first, then 1:1 768x768, compare
+   against CameraX ISP4x and direct Camera2 ZSL(5)/RECORD(3).
+4. Capture actual PRIVATE/Preview request.resolution AND CaptureResult
+   sensor crop, NR/EDGE, manual ISO, frameNs and source FPS. Use
+   scripts/lg-g6-main0-windows-diagnostics.ps1.
+5. Validate RTSP/RTCP/ONVIF, MJPEG fallback, camera reopen, dark noise
+   and thermal behavior on device. No false assurance from CI alone.
+6. APPEND verified run results and future changes to THIS TEXT FILE.
+
+
 ==============================================================================
