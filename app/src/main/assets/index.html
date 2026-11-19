@@ -672,6 +672,10 @@
             <div id="lg0Controls" hidden style="margin:16px 0; padding:12px; border:1px solid var(--border, #666); border-radius:8px;">
               <p class="group-title">LG G6 H872 · Main Camera ID 0</p>
               <small>Controls below target only Camera2 ID0. ISO50–800 is analog; post-RAW boost is digital.</small>
+              <div style="display:flex; gap:6px; flex-wrap:wrap; margin:8px 0;">
+                <button type="button" class="btn" onclick="lg0ApplyPreset('isp')">4× ISP / low heat</button>
+                <button type="button" class="btn" onclick="lg0ApplyPreset('gpu')">4× GPU / source detail</button>
+              </div>
               <label for="lgZoomMode">Zoom strategy (exclusive)</label>
               <select id="lgZoomMode" data-control="lg0_zoom_mode">
                 <option value="isp">CameraX ISP zoom (economical, test real detail)</option>
@@ -1163,6 +1167,25 @@
     }
 
     let lg0Info = null;
+    // Deliberately sequential: avoid races between mode, zoom and source settings.
+    async function lg0ApplyPreset(mode) {
+      if (!lg0Info?.target || !['isp', 'gpu'].includes(mode)) return;
+      const settings = [
+        ['lg0_zoom_mode', mode],
+        ['zoom', '4.0'],
+        ['roi_zoom', mode === 'gpu' ? '4.0' : '1.0'],
+        ['capture_resolution', mode === 'gpu' ? '4160x2340' : 'match'],
+        ['resolution', '1024x576'],
+        ['fps', '20'],
+        ['stream_bitrate_kbps', '2000']
+      ];
+      for (const [key, value] of settings) {
+        try { await sendControl(key, value); } catch (e) { console.warn('LG preset', key, e); }
+      }
+      desiredResolution = '1024x576';
+      loadDeviceInfo(true);
+    }
+
     function updateLg0Ui() {
       const panel = getElById('lg0Controls');
       if (!panel) return;
@@ -1879,6 +1902,16 @@
         opt.textContent = resolutionLabel(s.w, s.h);
         select.appendChild(opt);
       });
+      if (lg0Info?.target) {
+        for (const [w,h] of [[1024,576],[960,540]]) {
+          if (!Array.from(select.options).some(o => o.value === w + 'x' + h)) {
+            const opt = document.createElement('option');
+            opt.value = w + 'x' + h;
+            opt.textContent = resolutionLabel(w,h) + ' · LG ROI output';
+            select.appendChild(opt);
+          }
+        }
+      }
       const available = Array.from(select.options).some(o => o.value === desiredResolution);
       if (available) {
         select.value = desiredResolution;
