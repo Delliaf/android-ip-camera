@@ -1,5 +1,8 @@
 # Android IP Camera
 
+> **Разработчикам этого форка:** параллельная разработка LG G6 и обмен знаниями между независимыми ИИ-чатами описаны в [AGENTS.md](AGENTS.md), [START_HERE](docs/coordination/START_HERE.md) и [универсальном промпте](docs/coordination/UNIVERSAL_PROMPT.md). Экспериментальный код находится в отдельных draft PR; `main` не содержит все LG-функции. Новому чату нужно сначала прочитать эти документы **из main** и проверить живые GitHub ветки/PR.
+
+
 [![downloads](https://img.shields.io/github/downloads/DigitallyRefined/android-ip-camera/total.svg)](https://github.com/DigitallyRefined/android-ip-camera/releases)
 [![downloads](https://img.shields.io/github/downloads/DigitallyRefined/android-ip-camera/latest/total.svg)](https://github.com/DigitallyRefined/android-ip-camera/releases)
 
