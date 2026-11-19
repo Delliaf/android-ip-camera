@@ -26,7 +26,9 @@ internal class DevicePerformanceMonitor(private val context: Context) {
         val temperatureCelsius: Double?,
         val temperatureSource: String, // CPU, SoC, Battery, or unavailable
         val cpuNote: String = "",
-        val temperatureNote: String = ""
+        val temperatureNote: String = "",
+        /** ALWAYS sampled independently, even when a CPU/SoC sensor is available. */
+        val batteryTemperatureCelsius: Double? = null
     )
 
     private var previousSystem: CpuTicks? = null
@@ -35,6 +37,7 @@ internal class DevicePerformanceMonitor(private val context: Context) {
     private var lastSampleAtMs = -1L
     private var lastTemperatureAtMs = -1L
     private var cachedTemperature: Pair<Double?, String> = null to "unavailable"
+    private var cachedBatteryTemperatureCelsius: Double? = null
     private var temperatureNote = "No readable thermal sensor"
     private var lastSample = Sample(-1, "unavailable", null, "unavailable", "Warming up")
     private var rootUnavailable = false
@@ -101,16 +104,16 @@ internal class DevicePerformanceMonitor(private val context: Context) {
         previousTimeMs = now
 
         if (lastTemperatureAtMs < 0 || now - lastTemperatureAtMs >= 20_000L) {
-            val sensor = readThermal()
-                ?: readRootThermal()
+            // Battery temperature is NOT a fallback proxy for CPU temperature:
+            // collect separately so a readable SoC zone never hides battery.
+            cachedBatteryTemperatureCelsius = readBatteryTemperature().first
+            val sensor = readThermal() ?: readRootThermal()
             if (sensor != null) {
                 cachedTemperature = sensor
-                temperatureNote = "Thermal zone (" + sensor.second + ")"
+                temperatureNote = "Named thermal zone (" + sensor.second + ")"
             } else {
-                cachedTemperature = readBatteryTemperature()
-                temperatureNote = if (cachedTemperature.first != null)
-                    "CPU/SoC sensors unavailable; showing battery temperature"
-                else "CPU/SoC and battery temperature unavailable"
+                cachedTemperature = null to "unavailable"
+                temperatureNote = "CPU/SoC sensor unavailable; battery temperature reported separately"
             }
             lastTemperatureAtMs = now
         }
@@ -127,7 +130,8 @@ internal class DevicePerformanceMonitor(private val context: Context) {
             else -> "Collecting first CPU sample; check again after 5 seconds"
         }
         lastSample = Sample(cpu, scope, cachedTemperature.first,
-            cachedTemperature.second, note, temperatureNote)
+            cachedTemperature.second, note, temperatureNote,
+            batteryTemperatureCelsius = cachedBatteryTemperatureCelsius)
         lastSampleAtMs = now
         return lastSample
     }
@@ -136,8 +140,8 @@ internal class DevicePerformanceMonitor(private val context: Context) {
         return try {
             val intent = context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
             val tenths = intent?.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, -1) ?: -1
-            val temp = tenths / 10.0
-            if (tenths < 0 || temp !in -20.0..100.0) null to "unavailable"
+            val temp = BatteryTemperatureMath.fromTenths(tenths)
+            if (temp == null) null to "unavailable"
             else temp to "Battery"
         } catch (_: Exception) { null to "unavailable" }
     }
@@ -223,5 +227,15 @@ internal object CpuMath {
             else -> raw
         }
         return c.takeIf { it in -20.0..120.0 }
+    }
+}
+
+
+/** Android ACTION_BATTERY_CHANGED reports tenths of degrees Celsius. */
+internal object BatteryTemperatureMath {
+    fun fromTenths(tenths: Int): Double? {
+        if (tenths == -1) return null
+        val celsius = tenths / 10.0
+        return celsius.takeIf { it in -20.0..100.0 }
     }
 }
