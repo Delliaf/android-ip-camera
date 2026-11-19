@@ -620,7 +620,11 @@ class StreamingServerHelper(
                 }
 
                 writer.print("HTTP/1.1 200 OK\r\n")
-                writer.print("Content-Type: text/html\r\n")
+                writer.print("Content-Type: text/html; charset=utf-8\r\n")
+                // Cached index.html from pre-metrics APKs would permanently omit
+                // cpuStatus / temperatureStatus, even after installing new APKs.
+                writer.print("Cache-Control: no-store, max-age=0\r\n")
+                writer.print("Pragma: no-cache\r\n")
                 writer.print("Connection: close\r\n\r\n")
                 writer.print(htmlResponse)
                 writer.flush()
@@ -941,11 +945,17 @@ class StreamingServerHelper(
                     put("wifiStrength", getWifiStrength())
                     put("cpuPercent", sample.cpuPercent)
                     put("cpuScope", sample.cpuScope)
+                    put("cpuNote", sample.cpuNote)
                     put("temperatureCelsius", sample.temperatureCelsius ?: JSONObject.NULL)
                     put("temperatureSource", sample.temperatureSource)
+                    put("temperatureNote", sample.temperatureNote)
+                    put("metricsVersion", 2)
                 }.toString()
-                writer.print("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n")
-                writer.print("Cache-Control: no-store\r\nConnection: close\r\n\r\n")
+                writer.print("HTTP/1.1 200 OK\r\nContent-Type: application/json; charset=utf-8\r\n")
+                writer.print("Cache-Control: no-store, max-age=0\r\n")
+                writer.print("Pragma: no-cache\r\n")
+                writer.print("Content-Length: ${metrics.toByteArray(Charsets.UTF_8).size}\r\n")
+                writer.print("Connection: close\r\n\r\n")
                 writer.print(metrics)
                 writer.flush()
                 try { socket.close() } catch (_: Exception) {}
