@@ -357,4 +357,27 @@ NEW DEVICE A/B:
   codec fallback; log exact encoder requested/aligned dimensions.
 
 
+
+ISO EXTENSION SAFETY CORRECTION — 2026-11-19
+---------------------------------------------
+An additional review caught a subtle mistake in the first safe fallback:
+the threshold "actual < requested * 0.90" would disable experimental
+manual ISO if the user requested 3200 and the HAL returned 2728.
+BUT ACTUAL 2728 IS STILL SIGNIFICANTLY ABOVE THE ADVERTISED MAX OF 800,
+and such partial success should be preserved, not thrown away.
+Commits db094bb8 + 5a81fcc3 introduced the pure
+LgG6IsoVerification.extendedRequestIgnored() function and unit tests.
+Commit 2e4cc412 now disables extended mode only when requested ISO is
+above advertised max but CaptureResult continues at approximately the
+advertised max (plus 5% tolerance), or if HAL directly rejects request.
+This avoids silently losing useful >800 capability.
+
+LATEST FUNCTIONAL SHA REQUIRING CI:
+  2e4cc4125e2e2ff953d1a0dfe9746d50170ebbc9
+  Debug: https://github.com/Delliaf/android-ip-camera/actions/runs/44550645879
+  Release: https://github.com/Delliaf/android-ip-camera/actions/runs/44550645806
+Both jobs had not completed on first inspection. Only claim a new APK is
+built/tested after these runs succeed; any doc-only HEAD can be newer.
+
+
 ==============================================================================
