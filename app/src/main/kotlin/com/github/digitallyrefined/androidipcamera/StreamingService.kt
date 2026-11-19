@@ -1192,7 +1192,7 @@ class StreamingService : LifecycleService() {
         fun read(prefix: String, default: Float): Float =
             (id?.let { p.getString(prefix + it, null) }
                 ?: phys?.let { p.getString(prefix + it, null) })?.toFloatOrNull() ?: default
-        return Triple((if (lgMain0ZoomMode() == "isp") 1f
+        return Triple((if (lgMain0ZoomMode() in listOf("isp", "sensor", "vendor")) 1f
             else read("roi_zoom_", 1f)).coerceIn(1f, 8f),
             read("roi_x_", .5f).coerceIn(0f, 1f),
             read("roi_y_", .5f).coerceIn(0f, 1f))
@@ -1205,6 +1205,27 @@ class StreamingService : LifecycleService() {
             pipe.roiCenterX = x
             pipe.roiCenterY = y
         }
+    }
+
+    /** Exclusive ISP, GPU or Camera2 request crop. No accidental 4x*4x field-of-view loss. */
+    private fun applyLgMain0Zoom() {
+        if (!isLgH872Main0()) return
+        val prefs = PreferenceManager.getDefaultSharedPreferences(this)
+        val id = camId() ?: return
+        val zoom = prefs.getString("zoom_$id", "1")?.toFloatOrNull()?.coerceIn(1f, 8f) ?: 1f
+        val x = prefs.getString("roi_x_$id", "0.5")?.toFloatOrNull()?.coerceIn(0f, 1f) ?: .5f
+        val y = prefs.getString("roi_y_$id", "0.5")?.toFloatOrNull()?.coerceIn(0f, 1f) ?: .5f
+        val mode = lgMain0ZoomMode()
+        val b = backend
+        if (mode == "isp") {
+            b?.setLg0SensorCrop(null, 1f, .5f, .5f)
+            b?.setZoom(zoom)
+        } else {
+            b?.setZoom(1f) // CameraX must not zoom while GPU or sensor crop is used.
+            b?.setLg0SensorCrop(if (mode in listOf("sensor", "vendor")) mode else null,
+                zoom, x, y)
+        }
+        applyRoiToPipes()
     }
 
     /**
@@ -1775,7 +1796,7 @@ class StreamingService : LifecycleService() {
             else -> null
         }
         // Never chain ISP zoom and GPU crop on LG main0. They are exclusive modes.
-        if (isLgH872Main0() && lgMain0ZoomMode() == "gpu") b.setZoom(1f)
+        if (isLgH872Main0()) applyLgMain0Zoom()
         else zoom?.toFloatOrNull()?.let { b.setZoom(it) }
 
         val focus = when {
@@ -1790,6 +1811,8 @@ class StreamingService : LifecycleService() {
         if (isLgH872Main0()) {
             val gain = p.getString("lg0_post_raw_boost_$id", "off")
             b.setPostRawBoost(gain?.toIntOrNull()?.takeIf { it >= 100 })
+            b.setLg0VendorPeaking(
+                p.getString("lg0_peaking_$id", "off") == "on")
         }
         // Restore manual sensor settings after opening the camera; nulls restore AE.
         val mode = p.getString("manual_exposure_mode_$id",
@@ -2239,16 +2262,14 @@ class StreamingService : LifecycleService() {
                 val zStr = String.format(Locale.US, "%.1f", z)
                 prefs.edit().putString("zoom_$id", zStr).apply()
                 if (physicalId.isNotBlank() && physicalId != id) prefs.edit().putString("zoom_$physicalId", zStr).apply()
-                launchMain { backend?.setZoom(if (lgMain0ZoomMode() == "gpu") 1f else z) }
+                launchMain {
+                    if (isLgH872Main0()) applyLgMain0Zoom() else backend?.setZoom(z)
+                }
             }
             "lg0_zoom_mode" -> {
-                if (!isLgH872Main0() || id == null || value !in listOf("isp", "gpu")) return
+                if (!isLgH872Main0() || id == null || value !in listOf("isp", "gpu", "sensor", "vendor")) return
                 prefs.edit().putString("lg0_zoom_mode_$id", value).apply()
-                val wantedZoom = prefs.getString("zoom_$id", "1")?.toFloatOrNull() ?: 1f
-                launchMain {
-                    backend?.setZoom(if (value == "gpu") 1f else wantedZoom)
-                    applyRoiToPipes()
-                }
+                launchMain { applyLgMain0Zoom() }
             }
             "lg0_focus_diopters" -> {
                 if (!isLgH872Main0() || id == null) return
@@ -2263,6 +2284,11 @@ class StreamingService : LifecycleService() {
                     else value.toIntOrNull()?.takeIf { it in 100..3199 } ?: return
                 prefs.edit().putString("lg0_post_raw_boost_$id", gain?.toString() ?: "off").apply()
                 launchMain { backend?.setPostRawBoost(gain) }
+            }
+            "lg0_peaking" -> {
+                if (!isLgH872Main0() || id == null || value !in listOf("on", "off")) return
+                prefs.edit().putString("lg0_peaking_$id", value).apply()
+                launchMain { backend?.setLg0VendorPeaking(value == "on") }
             }
             "lg0_diagnostics" -> {
                 if (!isLgH872Main0() || value !in listOf("true", "false")) return
@@ -2352,7 +2378,11 @@ class StreamingService : LifecycleService() {
                 if (physicalId.isNotBlank() && physicalId != id)
                     edit.putString("${key}_$physicalId", n.toString())
                 edit.apply()
-                launchMain { applyRoiToPipes() }
+                launchMain {
+                    if (isLgH872Main0() && lgMain0ZoomMode() in listOf("sensor", "vendor"))
+                        applyLgMain0Zoom()
+                    else applyRoiToPipes()
+                }
             }
             "stream_bitrate_kbps" -> {
                 val kbps = value.toIntOrNull()
