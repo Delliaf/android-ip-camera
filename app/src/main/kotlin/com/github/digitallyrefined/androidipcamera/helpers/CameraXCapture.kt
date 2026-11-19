@@ -612,7 +612,7 @@ class CameraXCapture(
             ?: cm.cameraIdList.firstOrNull { cm.getCameraCharacteristics(it).get(CameraCharacteristics.LENS_FACING) == want }
             ?: cm.cameraIdList.first()
         val ranges = cm.getCameraCharacteristics(id).get(
-            CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES) ?: return null
+            CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES) ?: emptyArray<Range<Int>>()
         if (lgH872Main0) {
             val fps = androidx.preference.PreferenceManager.getDefaultSharedPreferences(ctx)
                 .getString("stream_fps", "20")?.toIntOrNull()?.coerceIn(1, 60) ?: 20
