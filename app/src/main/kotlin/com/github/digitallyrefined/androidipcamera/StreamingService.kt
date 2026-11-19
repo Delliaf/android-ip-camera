@@ -1198,6 +1198,11 @@ class StreamingService : LifecycleService() {
     private fun lgMain0Zoom(p: SharedPreferences): Float =
         (p.getString(LgG6Main0Profile.PREF_ZOOM, "4.0")?.toFloatOrNull() ?: 4f).coerceIn(1f, 8f)
 
+    /** Gamma below 1 brightens dark midtones in direct Camera2 only; 1 is unmodified. */
+    private fun lgDirectGamma(p: SharedPreferences): Float =
+        (p.getString("lg_main0_direct_gamma", "0.80")?.toFloatOrNull()
+            ?.takeIf { it.isFinite() } ?: .8f).coerceIn(.45f, 1.5f)
+
     /**
      * Camera0 default now preserves 4:3 photo sensor geometry, not 16:9.
      * 960x720 uses 1040x780 source pixels at 4x from 4160x3120.
@@ -1218,6 +1223,7 @@ class StreamingService : LifecycleService() {
         } else originalZoom
         val fill = LgG6Main0Profile.isTarget(camId()) && lgMain0ZoomMode(p) == "gpu"
         for (pipe in listOfNotNull(glPipe, cameraXGlPipe)) {
+            pipe.toneGamma = if (backend is LgG6Main0DirectCapture) lgDirectGamma(p) else 1f
             pipe.cropToFillOutput = fill
             pipe.roiZoom = zoom
             pipe.roiCenterX = x
@@ -1548,10 +1554,23 @@ class StreamingService : LifecycleService() {
                 "as PRIVATE; using ${source.width}x${source.height}")
         }
         val fps = streamFps().coerceIn(1, 30)
-        val encoded = surfaceEncoderSize(want)
-        val encoder = H264HardwareEncoder(encoded.width, encoded.height, fps,
-            H264HardwareEncoder.bitrateFor(encoded.width, encoded.height, mainBitrateKbps()),
+        var encoded = surfaceEncoderSize(want)
+        fun createEncoder(size: Size) = H264HardwareEncoder(size.width, size.height, fps,
+            H264HardwareEncoder.bitrateFor(size.width, size.height, mainBitrateKbps()),
             true) { data, key, pts -> h264.broadcastH264(data, key, pts) }
+        val encoder = try {
+            createEncoder(encoded)
+        } catch (first: Exception) {
+            // LG-H872 Qualcomm OMX refuses some legal-looking dimensions (e.g.
+            // 800x600 -> CodecException -1010), even when max width/height fit.
+            // Retry ONCE with chroma/OMX-aligned dimensions, preserving aspect.
+            val (w, h) = LgG6EncoderSizes.fallback16(encoded.width, encoded.height)
+            if (w == encoded.width && h == encoded.height) throw first
+            Log.w(TAG, "LG0 Qualcomm AVC rejected ${encoded.width}x${encoded.height}; " +
+                "retry aligned ${w}x${h}: ${first.message}")
+            encoded = Size(w, h)
+            createEncoder(encoded)
+        }
         h264.setEncoder(encoder)
         streamingServerHelper?.resetH264Wait()
         val pipe = CameraGlPipe(encoder.inputSurface!!, encoded.width, encoded.height, fps,
@@ -1560,6 +1579,8 @@ class StreamingService : LifecycleService() {
             it.rotation = quantizedRotation(readRotatePref())
             // A 4:3 13MP camera source must fill a 16:9 output without letterboxing.
             it.cropToFillOutput = true
+            it.toneGamma = lgDirectGamma(
+                PreferenceManager.getDefaultSharedPreferences(this))
             val (xZoom, x, y) = roiConfig()
             val p = PreferenceManager.getDefaultSharedPreferences(this)
             it.roiZoom = if (lgMain0ZoomMode(p) == "gpu") lgMain0Zoom(p) else 1f
@@ -1895,14 +1916,19 @@ class StreamingService : LifecycleService() {
             p.contains("focus_$phys") -> p.getString("focus_$phys", null)
             else -> null
         }
-        if (LgG6Main0Profile.isTarget(id) &&
-            p.getString(LgG6Main0Profile.PREF_FOCUS_MODE, "auto") == "diopters") {
-            val d = p.getString(LgG6Main0Profile.PREF_FOCUS_DIOPTERS, "0.25")
-                ?.toFloatOrNull() ?: .25f
-            b.setFocusDiopters(d.coerceIn(0f, 10f))
+        if (LgG6Main0Profile.isTarget(id)) {
+            if (p.getString(LgG6Main0Profile.PREF_FOCUS_MODE, "auto") == "diopters") {
+                val d = p.getString(LgG6Main0Profile.PREF_FOCUS_DIOPTERS, "0.25")
+                    ?.toFloatOrNull() ?: .25f
+                b.setFocusDiopters(d.coerceIn(0f, 10f))
+            } else {
+                // Ignore stale generic focus_distance from an older UI session.
+                // AUTO really means AF, not the previously saved normalized focus.
+                b.setManualFocus(-1f)
+                b.setFocusDiopters(null)
+            }
         } else {
             focus?.toFloatOrNull()?.let { b.setManualFocus(it) }
-            if (focus == null && LgG6Main0Profile.isTarget(id)) b.setFocusDiopters(null)
         }
         // Restore manual sensor settings after opening the camera; nulls restore AE.
         val mode = p.getString("manual_exposure_mode_$id",
@@ -2370,7 +2396,7 @@ class StreamingService : LifecycleService() {
                     .apply()
                 if (localRecorder?.isRecording != true) debouncedStartCamera()
             }
-            "lg_main0_zoom_mode", "lg_main0_zoom", "lg_main0_focus_mode",
+            "lg_main0_zoom_mode", "lg_main0_zoom", "lg_main0_direct_gamma", "lg_main0_focus_mode",
             "lg_main0_focus_diopters", "lg_main0_postraw_boost", "lg_main0_peaking",
             "lg_main0_telemetry", "lg_main0_processing", "lg_main0_preview_profile",
             "lg_main0_extended_iso" -> {
@@ -2382,6 +2408,8 @@ class StreamingService : LifecycleService() {
                     "lg_main0_zoom_mode" -> value.takeIf { it in listOf("isp", "gpu", "vendor") } ?: return
                     "lg_main0_zoom" -> value.toFloatOrNull()?.takeIf { it.isFinite() && it in 1f..8f }
                         ?.toString() ?: return
+                    "lg_main0_direct_gamma" -> value.toFloatOrNull()
+                        ?.takeIf { it.isFinite() && it in .45f..1.5f }?.toString() ?: return
                     "lg_main0_focus_mode" -> value.takeIf { it == "auto" || it == "diopters" } ?: return
                     "lg_main0_focus_diopters" -> value.toFloatOrNull()
                         ?.takeIf { it.isFinite() && it in 0f..10f }?.toString() ?: return
@@ -2429,9 +2457,17 @@ class StreamingService : LifecycleService() {
                     prefs.edit().putString("focus_$id", f.coerceIn(0f, 1f).toString()).apply()
                     if (physicalId.isNotBlank() && physicalId != id) prefs.edit().putString("focus_$physicalId", f.coerceIn(0f, 1f).toString()).apply()
                 }
-                if (LgG6Main0Profile.isTarget(id))
-                    prefs.edit().putString(LgG6Main0Profile.PREF_FOCUS_MODE, "auto").apply()
-                launchMain { backend?.setManualFocus(f) }
+                if (LgG6Main0Profile.isTarget(id)) {
+                    val editor = prefs.edit()
+                    if (f >= 0f) {
+                        // Generic focus slider is manual focus, not auto.
+                        editor.putString(LgG6Main0Profile.PREF_FOCUS_MODE, "diopters")
+                        editor.putString(LgG6Main0Profile.PREF_FOCUS_DIOPTERS,
+                            (f.coerceIn(0f, 1f) * 10f).toString())
+                    } else editor.putString(LgG6Main0Profile.PREF_FOCUS_MODE, "auto")
+                    editor.apply()
+                    launchMain { backend?.let { applyStored(it) } }
+                } else launchMain { backend?.setManualFocus(f) }
             }
             "snapshot_res" -> {
                 if (value == "max" || value == "stream") {
