@@ -26,7 +26,7 @@ class LgG6PhotoPreviewTest {
         assertEquals(1040f, roi.width * 4160f, .001f)
         assertEquals(585f, roi.height * 3120f, .001f)
     }
-    @Test fun 12MpCropFitsOutputWithoutLetterboxing() {
+    @Test fun twelveMpCropFitsOutputWithoutLetterboxing() {
         val roi = RoiCrop.windowForOutput(4f, 1f, 0f, 4000, 3000, 960, 540)
         assertEquals(1000f, roi.width * 4000, .005f)
         assertEquals(562.5f, roi.height * 3000, .005f)
