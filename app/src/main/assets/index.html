@@ -647,6 +647,26 @@
             <div id="lgG6Main0Panel" hidden style="margin:16px 0; padding:14px; border:1px solid #666; border-radius:8px;">
               <p class="group-title" style="margin:0 0 8px;">LG G6 H872 · Main Camera ID0</p>
               <small>LG camera0 only. Normal Camera2 works without root.</small>
+              <label for="lgMain0Backend">Capture engine</label>
+              <select id="lgMain0Backend" data-control="api">
+                <option value="camerax">CameraX · stable default</option>
+                <option value="lg-main0-direct">Direct Camera2 photo-preview · experimental</option>
+              </select>
+              <small>Direct Camera2 can set true ZSL(5) and RECORD(3) templates. Use H.264/RTSP; MJPEG, snapshots, motion analysis and on-phone Preview fall back to CameraX.</small>
+              <label for="lgMain0PreviewProfile">Direct Camera2 repeating-request template</label>
+              <select id="lgMain0PreviewProfile" data-control="lg_main0_preview_profile">
+                <option value="zsl">Photo ZSL template 5 · OEM photo-mode A/B</option>
+                <option value="video">Video RECORD template 3 · A/B reference</option>
+                <option value="default">PREVIEW template 1 · ordinary</option>
+                <option value="fast">PREVIEW + FAST ISP post-processing</option>
+                <option value="hq">PREVIEW + HQ NR/EDGE (may lower FPS)</option>
+              </select>
+              <label for="lgMain0Processing">CameraX ISP noise reduction & sharpening</label>
+              <select id="lgMain0Processing" data-control="lg_main0_processing">
+                <option value="off">Default CameraX processing</option>
+                <option value="fast">FAST noise reduction + edges</option>
+                <option value="hq">HIGH QUALITY noise reduction + edges (slower)</option>
+              </select>
               <div style="display:flex; gap:6px; flex-wrap:wrap; margin:12px 0;">
                 <button id="lgPresetIsp" class="btn" type="button">ISP 4× · 960×540</button>
                 <button id="lgPresetGpu" class="btn" type="button">4K GPU ROI 4×</button>
@@ -1131,7 +1151,7 @@
     // Map control parameter names to the `lensSettings` keys used in `info.json`.
     function toLensKey(param) {
       if (!param) return null;
-      if (param.startsWith('lg_main0_')) return null;
+      if (param.startsWith('lg_main0_') || param === 'api') return null;
       if (param === 'focus' || param === 'focus_distance') return 'focusDistance';
       if (param === 'snapshot_res') return 'snapshotRes';
       // Motion detection and RTSP/substream settings are global, not lens settings.
@@ -1167,6 +1187,9 @@
       }
       const settings = data?.settings || {};
       const controls = {
+        lgMain0Backend: settings.api === 'lg-main0-direct' ? 'lg-main0-direct' : 'camerax',
+        lgMain0PreviewProfile: settings.lgPreviewProfile,
+        lgMain0Processing: settings.lgProcessing,
         lgMain0ZoomMode: settings.lgZoomMode,
         lgMain0Zoom: settings.lgZoom,
         lgMain0FocusMode: settings.lgFocusMode,
@@ -1179,6 +1202,11 @@
         const el = getElById(id);
         if (el && val !== undefined && val !== null) el.value = String(val);
       }
+      const direct = getElById('lgMain0Backend')?.value === 'lg-main0-direct';
+      const profile = getElById('lgMain0PreviewProfile');
+      if (profile) profile.disabled = !direct;
+      const processing = getElById('lgMain0Processing');
+      if (processing) processing.disabled = direct;
       const vendorOpt = getElById('lgMain0ZoomMode')?.querySelector('option[value="vendor"]');
       if (vendorOpt) vendorOpt.disabled = !cam.lgVendorZoomAvailable;
       const peak = getElById('lgMain0Peaking');
@@ -1400,7 +1428,8 @@
         setTimeout(() => loadDeviceInfo(true), 1200);
       });
     }
-    for (const id of ['lgMain0ZoomMode', 'lgMain0FocusMode', 'lgMain0FocusDiopters', 'lgMain0Zoom'])
+    for (const id of ['lgMain0Backend', 'lgMain0Processing', 'lgMain0ZoomMode',
+                      'lgMain0FocusMode', 'lgMain0FocusDiopters', 'lgMain0Zoom'])
       getElById(id)?.addEventListener('input', () => updateLgMain0Ui({settings: {}}, false));
 
 
