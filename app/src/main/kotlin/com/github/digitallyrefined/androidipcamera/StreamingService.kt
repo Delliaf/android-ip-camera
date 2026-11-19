@@ -1162,7 +1162,7 @@ class StreamingService : LifecycleService() {
      * downscaled before selecting the region of interest.
      */
     private fun isLgH872Main0(): Boolean =
-        LgG6Main0Probe.isTarget(camId()?.substringBefore(':'))
+        LgG6Main0Probe.isTarget(camId())
 
     /** Mutually exclusive on LG main0: ISP camera zoom or full-frame GPU crop. */
     private fun lgMain0ZoomMode(): String {
