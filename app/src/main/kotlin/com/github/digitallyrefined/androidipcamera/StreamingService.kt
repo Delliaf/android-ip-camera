@@ -1875,6 +1875,7 @@ class StreamingService : LifecycleService() {
             b.setLgFocusPeaking(p.getBoolean(LgG6Main0Profile.PREF_PEAKING, false))
             b.setLgPhotoProcessing(p.getString("lg_main0_processing", "off") ?: "off")
             b.setLgPreviewProfile(p.getString("lg_main0_preview_profile", "zsl") ?: "zsl")
+            b.setLgExtendedIso(p.getBoolean(LgG6Main0Profile.PREF_EXTENDED_ISO, false))
             applyRoiToPipes()
         } else zoom?.toFloatOrNull()?.let { b.setZoom(it) }
 
@@ -2350,7 +2351,8 @@ class StreamingService : LifecycleService() {
             }
             "lg_main0_zoom_mode", "lg_main0_zoom", "lg_main0_focus_mode",
             "lg_main0_focus_diopters", "lg_main0_postraw_boost", "lg_main0_peaking",
-            "lg_main0_telemetry", "lg_main0_processing", "lg_main0_preview_profile" -> {
+            "lg_main0_telemetry", "lg_main0_processing", "lg_main0_preview_profile",
+            "lg_main0_extended_iso" -> {
                 if (!LgG6Main0Profile.isTarget(id)) return
                 val saved = when (key) {
                     "lg_main0_processing" -> value.takeIf { it in listOf("off", "fast", "hq") } ?: return
@@ -2367,7 +2369,8 @@ class StreamingService : LifecycleService() {
                     else -> value.takeIf { it == "true" || it == "false" } ?: return
                 }
                 val editor = prefs.edit()
-                if (key == "lg_main0_peaking" || key == "lg_main0_telemetry")
+                if (key == "lg_main0_peaking" || key == "lg_main0_telemetry" ||
+                    key == "lg_main0_extended_iso")
                     editor.putBoolean(key, saved.toBoolean())
                 else editor.putString(key, saved)
                 if (key == "lg_main0_focus_mode" && saved == "auto") {
