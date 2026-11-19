@@ -21,6 +21,9 @@ import android.widget.ImageButton
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
+import com.github.digitallyrefined.androidipcamera.helpers.LgG6Main0Profile
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
@@ -51,6 +54,41 @@ class MainActivity : AppCompatActivity() {
     private lateinit var openTunnelText: TextView
     private var openTunnelPollJob: Job? = null
     private lateinit var backGestureCallback: OnBackPressedCallback
+
+    private val benchmarkLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) {
+        // Restore the original background streaming/ONVIF service on return.
+        if (allPermissionsGranted() && !isBound && !isFinishing) startService()
+    }
+
+    private fun openCameraBenchmark() {
+        AlertDialog.Builder(this)
+            .setTitle("LG G6 Camera0 • image benchmark")
+            .setMessage("This temporarily pauses RTSP/ONVIF and any recording so the test can " +
+                "access the main sensor exclusively. A test captures sample frames at a " +
+                "fixed 4.5× zoom and creates a local ZIP. Continue?")
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Run") { _, _ ->
+                try {
+                    streamingService?.setPreviewSurface(null)
+                    if (isBound) {
+                        unbindService(connection)
+                        isBound = false
+                        streamingService = null
+                    }
+                    stopService(Intent(this, StreamingService::class.java))
+                    // Let CameraX / Camera2 sessions release before opening direct Camera2.
+                    viewBinding.root.postDelayed({
+                        if (!isFinishing)
+                            benchmarkLauncher.launch(Intent(this, LgMain0BenchmarkActivity::class.java))
+                    }, 1600L)
+                } catch (e: Exception) {
+                    Toast.makeText(this, "Cannot pause streaming: ${e.message}", Toast.LENGTH_LONG).show()
+                    if (!isBound && allPermissionsGranted()) startService()
+                }
+            }.show()
+    }
 
     private val connection = object : ServiceConnection {
         override fun onServiceConnected(className: ComponentName, service: IBinder) {
@@ -182,6 +220,10 @@ class MainActivity : AppCompatActivity() {
         showNoClientMessage(true)
         updateIpAddressText()
 
+        findViewById<ImageButton>(R.id.benchmarkButton).apply {
+            visibility = if (LgG6Main0Profile.isDevice()) View.VISIBLE else View.GONE
+            setOnClickListener { openCameraBenchmark() }
+        }
         findViewById<ImageButton>(R.id.settingsButton).setOnClickListener {
             startActivity(Intent(this, SettingsActivity::class.java))
         }
@@ -468,6 +510,7 @@ class MainActivity : AppCompatActivity() {
         val ipAddressText = findViewById<TextView>(R.id.ipAddressText)
         val urlBar = findViewById<View>(R.id.urlBar)
         val settingsButton = findViewById<ImageButton>(R.id.settingsButton)
+        val benchmarkButton = findViewById<ImageButton>(R.id.benchmarkButton)
         val hidePreviewButton = findViewById<ImageButton>(R.id.hidePreviewButton)
         val exitButton = findViewById<ImageButton>(R.id.exitButton)
 
@@ -478,6 +521,7 @@ class MainActivity : AppCompatActivity() {
             ipAddressText.visibility = View.GONE
             urlBar.visibility = View.GONE
             settingsButton.visibility = View.GONE
+            benchmarkButton.visibility = View.GONE
             noClientMessage.visibility = View.GONE
             hidePreviewButton.visibility = View.GONE
             exitButton.visibility = View.GONE
@@ -498,6 +542,7 @@ class MainActivity : AppCompatActivity() {
             ipAddressText.visibility = View.VISIBLE
             urlBar.visibility = View.VISIBLE
             settingsButton.visibility = View.VISIBLE
+            benchmarkButton.visibility = if (LgG6Main0Profile.isDevice()) View.VISIBLE else View.GONE
             hidePreviewButton.visibility = View.VISIBLE
             exitButton.visibility = View.VISIBLE
             updateOpenTunnelText()

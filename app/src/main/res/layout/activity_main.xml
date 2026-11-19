@@ -36,6 +36,13 @@
         app:layout_constraintTop_toTopOf="parent"
         app:layout_constraintEnd_toEndOf="parent">
         <ImageButton
+            android:id="@+id/benchmarkButton"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="@android:color/transparent"
+            android:src="@android:drawable/ic_menu_gallery"
+            android:contentDescription="LG G6 auto image benchmark" />
+        <ImageButton
             android:id="@+id/settingsButton"
             android:layout_width="48dp"
             android:layout_height="48dp"

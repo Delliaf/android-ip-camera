@@ -518,3 +518,154 @@ device logs. To use with go2rtc on an isolated/trusted LAN: turn OFF only
 then configure onvif://PHONE_IP:8000. Turning OFF ONVIF HTTPS must NOT
 disable the main web TLS or RTSPS.
 ==============================================================================
+
+
+2026-11-19 — EXPERIMENTAL AUTOMATED IMAGE QUALITY BENCHMARK (NEW PR #4)
+==============================================================================
+User proposed in-app automatic analysis of image quality: sweep Camera0 modes
+and meaningful settings, use the highest available source resolution, apply a
+constant 4.5x digital zoom, store example frames plus per-case measurements
+and camera readback in a portable ZIP. Parent branch = fix/onvif-go2rtc-telemetry
+(v0.18.0-delliaf.6, successful APK Actions run 44556499036).
+Do not overwrite existing PR #1/#2/#3 or stable main.
+
+NEW DEVELOPMENT BRANCH:
+  feature/lg-main0-auto-image-benchmark
+DRAFT PR:
+  https://github.com/Delliaf/android-ip-camera/pull/4
+VERSION:
+  0.18.0-delliaf.7 / versionCode 187 / ARM64-V8A ONLY / Android 8+
+CODE FILES:
+  helpers/LgBenchmarkPlan.kt: fixed 4.5x, bounded Quick <=24 and Deep <=90
+    test cases using supported PREVIEW(1), RECORD(3), ZSL(5), ISP vs CPU
+    crop, finite enumerated NR/EDGE/aberration/AWB settings, representative
+    ISO/shutter and manual-focus samples. Full Cartesian enumeration of
+    continuous ranges is intentionally impossible/unsafe.
+  helpers/LgBenchmarkImaging.kt: normalize YUV_420_888 full source into
+    comparable 4.5x information-scale NV21/JPEG; 4:3 or square crop;
+    measure mean luma, contrast stddev, histogram p01/p99, clipping,
+    edge energy, Laplacian variance and temporal frame difference.
+  helpers/LgMain0ImageBenchmark.kt: exclusive Camera2 ID0 session, try
+    highest supported YUV resolution then fallback; read actual Camera2
+    TotalCaptureResult (ISO, exposure, focus, crop, frame duration,
+    NR/EDGE/AWB/AE); JPEG for each passing case; ZIP includes report.json,
+    results.csv, device.json, samples/*.jpg, README.txt. Strict per-case
+    failure isolation, cancellation, temperature/time safety limits.
+  activities/LgMain0BenchmarkActivity.kt: offline Quick/Deep UI, local ZIP
+    path, Android SAF export via CreateDocument application/zip, no upload.
+  MainActivity.kt, activity_main.xml, AndroidManifest.xml: H872-only
+    gallery-icon launcher, explicit warning that streaming/recording is
+    interrupted; stop foreground StreamingService before Camera2 test and
+    restore service when user returns.
+  app/src/test/.../LgBenchmarkPlanTest.kt: planning/ISO/noise image math
+    unit tests; no device image needed.
+  LG_G6_MAIN0_IMAGE_BENCHMARK.md: operating and validation guide.
+  app/build.gradle: version bumped to .7.
+  .github/workflows/android8-fork-ci.yml: enable branch push CI.
+
+UNVERIFIED / IMPORTANT:
+- Root not required or used; OEM .so/APK not embedded.
+- YUV_420_888 at 4160x3120 may not be accepted for repeating session,
+  even when available output sizes include it. Runner tries next smaller.
+- The actual PHOTO preview of stock LG is NOT guaranteed merely by
+  selecting ZSL template5; proprietary ISP/CPP processing may differ.
+- The first benchmark exercises Camera2 templates and standard ISP vs
+  software center cropping. CameraX-specific Preview image capture and
+  encoder output are NOT yet captured by this test.
+- Matched sample JPEGs are native *information scale*, e.g. 4160x3120
+  source / 4.5x -> approx 924x692 (or square 692x692). Do NOT claim
+  these are 13MP 4.5x original-detail frames.
+- Frame-to-CaptureResult association is based on last completed result
+  near image delivery, not exact timestamp matching. It is documented
+  in report; improve pairing if hardware tests show ambiguity.
+- No attempt to declare highest subjective quality from a single
+  edge/laplacian metric; charts and real scene/tripod are needed.
+- On-device tests, thermal limits, camera pause/resume, zip writing,
+  and RTSP/ONVIF behavior after exit are NOT yet verified.
+- CI must pass for latest functional code SHA (see GitHub PR #4 Checks).
+  One early build run 44559925986 was CANCELLED by subsequent doc commit;
+  use run 44560189309 or later result for actual compilation.
+- Case failures are expected and recorded, especially unsupported Camera2
+  TEMPLATE_ZSL / HDR / NR combos.
+
+NEXT ENGINEER START HERE:
+1. Open PR #4 and inspect latest head commit, GitHub CI run/jobs/logs.
+   Fix all Kotlin, Android resource and JVM-test errors; repeat until
+   ARM64-v8a APK build artifact succeeds for current SHA.
+2. Install APK on H872 while backed up, tap gallery icon, run QUICK 4:3.
+   Confirm streaming service closes and reopens, no stuck Camera0.
+3. Verify max YUV size, 4.5x crop, per-case JPG, report.json Actual vs
+   Requested, thermals, cancellation, exported ZIP via Android SAF.
+4. Run Deep mode on tripod/fixed scene, examine mode failures; use
+   report and images for best Camera0 PHOTO/ZSL vs VIDEO/RECORD comparison.
+5. Extend with a CameraX-specific frame test if direct Camera2 benchmark
+   cannot reproduce the sharp OEM photo preview. Consider timestamp-exact
+   CaptureResult linkage and staged ISO/AF/AE settling diagnostics.
+6. Append date, SHA, CI URLs and measured device outcomes to THIS FILE
+   after every milestone. Never commit sensitive pictures/diagnostic ZIPs.
+==============================================================================
+
+
+VERIFIED BUILD — LG Camera0 4.5x AUTOMATIC IMAGE BENCHMARK
+==============================================================================
+DATE: 2026-11-19
+PR: https://github.com/Delliaf/android-ip-camera/pull/4
+BRANCH: feature/lg-main0-auto-image-benchmark
+EXACT TESTED FUNCTIONAL COMMIT:
+  bbe1141f069dd04666deb5c9ce9e5401bc6e802b
+GITHUB ACTIONS RUN — COMPLETED SUCCESS:
+  https://github.com/Delliaf/android-ip-camera/actions/runs/44561531501
+BUILD ARTIFACT (ZIP, contains APK):
+  android-ip-camera-android8-debug
+  artifact id: 14549656797
+  compressed size: 11,242,905 bytes
+  build version: 0.18.0-delliaf.7 / versionCode 187
+  target OS: Android 8+ / ARM64-V8A ONLY
+
+SUCCESSFUL CI STEPS:
+  - Embedded browser JavaScript syntax validation
+  - :app:testDebugUnitTest + :app:assembleDebug (including benchmark code)
+  - Unpacked APK native libraries all under lib/arm64-v8a/
+  - Artifact published
+Kotlin/JVM TESTS INCLUDE:
+  LgBenchmarkPlanTest (PREVIEW/RECORD/ZSL matrix, crop pipelines, ISO bounds,
+  luminance clipping, uniform vs varying sharpness, temporal difference).
+  Earlier ROI, ONVIF, RTSP, and other unit tests also ran.
+
+NOT YET VERIFIED BY HARDWARE:
+  - 4160x3120 YUV repeating Camera2 session accepted + active frame delivery,
+    correct native 4.5x crop, sample colors, timestamp/readback pairing.
+  - Camera0 exclusive access/reopen after stopping existing service;
+    return to RTSP/ONVIF and previous recording settings.
+  - Thermal safety, cancellation, long deep test stability and ZIP
+    export through Android storage picker on LG-H872 Android 8.
+  - Template5 ZSL-like images actually resemble LG OEM photo preview.
+  - Effects of selecting ISO, NR and focus on real photos.
+
+CURRENT IMPLEMENTATION:
+  - Both Quick (up to 24 cases) and Deep (up to 90) available via LG-only
+    in-app gallery button. Fixed 4.5x. Highest DELIVERING YUV size selected;
+    configured-but-silent resolutions automatically fall back.
+  - ISP vs software ROI images normalized to matching *true sample scale*,
+    not cosmetically upscaled source resolution.
+  - Actual Camera2 result paired to image.timestamp/SENSOR_TIMESTAMP where
+    possible. CSV and JSON include ISO/shutter/NR/EDGE, exposure, sharpness,
+    noise, clipping and mismatch flags; failed cases retain error messages.
+  - ZIP stored locally and exported via Android ACTION_CREATE_DOCUMENT;
+    NO auto-upload of scene photos.
+  - On-device activity requires manual activation and suspends camera
+    streaming during tests; original service resumes on return.
+
+FIRST ON-DEVICE STEPS:
+1. Install artifact from the VERIFIED run. Back up settings if APK signing
+   differs from the existing installed version.
+2. Select Camera0 on LG-H872. Open benchmark with gallery icon.
+3. Start Quick 4:3 with a stable target/tripod, examine whether max YUV
+   4160x3120 was accepted and delivering; otherwise note fallback size.
+4. Export ZIP, review report.json for successes/failures and visually
+   compare paired samples. Optionally run Deep and 1:1 afterward.
+5. Use device logs if session/focus/ZSL modes fail; never commit images
+   or raw private logs into public GitHub.
+6. Append actual device results and changes to THIS FILE before merging.
+All PRs #1/#2/#3/#4 remain experimental and draft pending LG device tests.
+==============================================================================

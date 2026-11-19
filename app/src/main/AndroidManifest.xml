@@ -39,6 +39,11 @@
             </intent-filter>
         </activity>
         <activity
+            android:name=".activities.LgMain0BenchmarkActivity"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:label="LG G6 Main0 4.5x image benchmark" />
+        <activity
             android:name=".activities.SettingsActivity"
             android:label="Settings"
             android:parentActivityName=".activities.MainActivity" />

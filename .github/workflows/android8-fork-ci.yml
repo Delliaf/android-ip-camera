@@ -5,6 +5,7 @@ on:
     branches:
       - feature/manual-camera-4k-stream
       - fix/onvif-go2rtc-telemetry
+      - feature/lg-main0-auto-image-benchmark
     paths-ignore:
       - 'DEVELOPMENT_HISTORY.txt'
       - 'AGENTS.md'
