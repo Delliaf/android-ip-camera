@@ -57,6 +57,9 @@ internal class LgMain0ImageBenchmark(private val context: Context) {
     private val monitor = DevicePerformanceMonitor(context)
     @Volatile private var collecting = false
     @Volatile private var lastResult: TotalCaptureResult? = null
+    private val resultLock = Any()
+    private val resultsByTimestamp = LinkedHashMap<Long, TotalCaptureResult>()
+    private data class CapturedSample(val frame: LgBenchmarkFrame, val timestampNs: Long)
     @Volatile private var device: CameraDevice? = null
     @Volatile private var session: CameraCaptureSession? = null
     private var reader: ImageReader? = null
@@ -91,6 +94,13 @@ internal class LgMain0ImageBenchmark(private val context: Context) {
         override fun onCaptureCompleted(sess: CameraCaptureSession,
             request: CaptureRequest, result: TotalCaptureResult) {
             lastResult = result
+            result.get(CaptureResult.SENSOR_TIMESTAMP)?.let { timestamp ->
+                synchronized(resultLock) {
+                    resultsByTimestamp[timestamp] = result
+                    while (resultsByTimestamp.size > 80)
+                        resultsByTimestamp.remove(resultsByTimestamp.keys.first())
+                }
+            }
         }
     }
 
@@ -207,14 +217,26 @@ internal class LgMain0ImageBenchmark(private val context: Context) {
     }
 
     private fun captureNormalized(cpu: Boolean, square: Boolean,
-                                  timeoutMs: Long = 9000): LgBenchmarkFrame {
+                                  timeoutMs: Long = 9000): CapturedSample {
         flushImages()
         collecting = true
         try {
             val image = pendingImages.poll(timeoutMs, TimeUnit.MILLISECONDS)
                 ?: error("YUV output timeout; HAL stalled or no compatible stream")
-            return image.use { LgBenchmarkImaging.normalize(it, LgBenchmarkPlan.ZOOM, cpu, square) }
+            return image.use {
+                CapturedSample(LgBenchmarkImaging.normalize(it, LgBenchmarkPlan.ZOOM, cpu, square),
+                    it.timestamp)
+            }
         } finally { collecting = false; flushImages() }
+    }
+
+    private fun resultFor(timestampNs: Long): Pair<TotalCaptureResult?, Boolean> {
+        for (i in 0..8) {
+            val exact = synchronized(resultLock) { resultsByTimestamp[timestampNs] }
+            if (exact != null) return exact to true
+            if (i < 8) Thread.sleep(45)
+        }
+        return lastResult to false
     }
 
     private fun resultJson(result: TotalCaptureResult?, request: CaptureRequest): JSONObject =
@@ -239,7 +261,7 @@ internal class LgMain0ImageBenchmark(private val context: Context) {
                 ?: JSONObject.NULL)
             put("captureResultTimestampNs",
                 result?.get(CaptureResult.SENSOR_TIMESTAMP) ?: JSONObject.NULL)
-            put("readbackNote", "Latest completed request readback near image delivery; timestamp not exactly paired")
+            put("readbackNote", "Camera2 SENSOR_TIMESTAMP matched to YUV Image.timestamp where supported; otherwise latest completed CaptureResult (see captureResultTimestampMatched)")
         }
 
     private fun metricsJson(frame: LgBenchmarkFrame, prev: LgBenchmarkFrame?): JSONObject {
@@ -366,15 +388,18 @@ internal class LgMain0ImageBenchmark(private val context: Context) {
                         Thread.sleep(if (c.iso != null) 550 else 900)
                         val first = captureNormalized(c.pipeline == "cpu", square)
                         val second = captureNormalized(c.pipeline == "cpu", square)
-                        row.put("width", second.width); row.put("height", second.height)
-                        row.put("jpegBytes", second.jpeg.size)
-                        row.put("captureResult", resultJson(lastResult, request))
-                        row.put("imageMetrics", metricsJson(second, first))
+                        val (matchingResult, timestampMatched) = resultFor(second.timestampNs)
+                        row.put("width", second.frame.width); row.put("height", second.frame.height)
+                        row.put("jpegBytes", second.frame.jpeg.size)
+                        row.put("imageTimestampNs", second.timestampNs)
+                        row.put("captureResultTimestampMatched", timestampMatched)
+                        row.put("captureResult", resultJson(matchingResult, request))
+                        row.put("imageMetrics", metricsJson(second.frame, first.frame))
                         row.put("temperatureC", temp.temperatureCelsius ?: JSONObject.NULL)
                         row.put("temperatureSource", temp.temperatureSource)
                         row.put("cpuPercent", temp.cpuPercent)
                         val fileName = "samples/%03d_%s.jpg".format(Locale.US, index+1, c.id)
-                        write(fileName, second.jpeg)
+                        write(fileName, second.frame.jpeg)
                         row.put("image", fileName)
                         row.put("status", "ok")
                         completed++
