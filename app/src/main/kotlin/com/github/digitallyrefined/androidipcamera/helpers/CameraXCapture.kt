@@ -103,6 +103,14 @@ class CameraXCapture(
     @Volatile private var manualFocus: Float? = null
     @Volatile private var manualIso: Int? = null
     @Volatile private var manualShutterUs: Long? = null
+    @Volatile private var preciseFocusDiopters: Float? = null
+    @Volatile private var postRawBoostPercent: Int? = null
+    @Volatile private var lg0CropMode: String? = null
+    @Volatile private var lg0CropZoom = 1f
+    @Volatile private var lg0CropX = .5f
+    @Volatile private var lg0CropY = .5f
+    @Volatile private var lg0Peaking = false
+    @Volatile private var lastCachedFrameMs = 0L
     private val main = ContextCompat.getMainExecutor(ctx)
     private val analysisExec = Executors.newSingleThreadExecutor()
 
@@ -117,6 +125,7 @@ class CameraXCapture(
     @Volatile private var latestNv21AtMs = 0L
 
     private val logicalCameraId: String? = cameraId?.substringBefore(':')
+    private val lgH872Main0 get() = LgG6Main0Probe.isTarget(cameraId)
     private val physicalCameraId: String? = cameraId
         ?.substringAfter(':', "")
         ?.takeIf { it.isNotBlank() }
@@ -146,6 +155,12 @@ class CameraXCapture(
                     .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888)
                 val analysisInterop = Camera2Interop.Extender(aBuilder)
                 physicalCameraId?.let { analysisInterop.setPhysicalCameraId(it) }
+                if (lgH872Main0 && androidx.preference.PreferenceManager.getDefaultSharedPreferences(ctx)
+                        .getBoolean("lg0_diagnostics", false)) {
+                    LgG6Main0Probe.logAdvertisedKeys(ctx, logicalCameraId)
+                    LgG6Main0Probe.clear()
+                    analysisInterop.setSessionCaptureCallback(LgG6Main0Probe.TelemetryCallback())
+                }
                 // Some legacy HALs (e.g. this phone's rear cam) stall the analysis stream unless an AE
                 // target FPS range is set. Use the WIDEST advertised range, not a fixed lock — AE stays
                 // fully auto (drops low for light in the dark, up to 30 in good light).
@@ -158,7 +173,11 @@ class CameraXCapture(
                         width = img.width; height = img.height
                         hasProducedFrame = true
                         lastFrameAtMs = SystemClock.elapsedRealtime()
-                        try {
+                        // The 4K CameraX surface stream does not need a full YUV->NV21 copy
+                        // on every frame. Keep a <=1.2-second-old still fallback, but sample
+                        // it only occasionally on the LG main camera to reduce heat and DRAM.
+                        if (!lgH872Main0 ||
+                            SystemClock.elapsedRealtime() - lastCachedFrameMs >= 1200L) try {
                             val crop = img.cropRect
                             val nv21 = synchronized(nv21Lock) {
                                 convertYUV420toNV21(img, nv21Buffer, nv21RowBuffer).also {
@@ -171,6 +190,7 @@ class CameraXCapture(
                             latestNv21 = nv21
                             latestNv21W = crop.width(); latestNv21H = crop.height()
                             latestNv21AtMs = System.currentTimeMillis()
+                            lastCachedFrameMs = SystemClock.elapsedRealtime()
                         } catch (e: Exception) { Log.e(TAG, "frame cache: ${e.message}") }
                         onFrame(img)
                     } }
@@ -421,6 +441,7 @@ class CameraXCapture(
             // Drop any manual-focus override, else the lingering CONTROL_AF_MODE_OFF
             // defeats the AF scan below.
             manualFocus = null
+            preciseFocusDiopters = null
             applyAdvancedCaptureRequest()
             val pt = SurfaceOrientedMeteringPointFactory(1f, 1f).createPoint(0.5f, 0.5f)
             cam.cameraControl.startFocusAndMetering(
@@ -439,13 +460,53 @@ class CameraXCapture(
         try {
             val info = Camera2CameraInfo.from(cam.cameraInfo)
             val options = CaptureRequestOptions.Builder()
-            manualFocus?.let { norm ->
-                val maxDiopters = info.getCameraCharacteristic(
-                    CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE) ?: 0f
+            // The LG camera app's DEX applies SCALER_CROP_REGION and an optional
+            // Float com.lge.camera.zoom.ratio key. Both are *experimental* here,
+            // isolated from CameraX cameraControl.setZoomRatio (which must stay 1x).
+            if (lgH872Main0 && lg0CropMode in listOf("sensor", "vendor")) {
+                val manager = ctx.getSystemService(Context.CAMERA_SERVICE) as CameraManager
+                val chars = manager.getCameraCharacteristics("0")
+                val active = chars.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
+                active?.let {
+                    val crop = LgG6Main0Math.sensorCrop(
+                        LgPixelRect(it.left, it.top, it.right, it.bottom),
+                        lg0CropZoom.toDouble(), 16, 9,
+                        lg0CropX.toDouble(), lg0CropY.toDouble()
+                    )
+                    options.setCaptureRequestOption(CaptureRequest.SCALER_CROP_REGION,
+                        android.graphics.Rect(crop.left, crop.top, crop.right, crop.bottom))
+                }
+                val advertised = chars.availableCaptureRequestKeys.map { it.name }.toSet()
+                if (lg0CropMode == "vendor") {
+                    if (LgG6Main0Probe.VENDOR_ZOOM in advertised) {
+                        // Exact Java Float type recovered from LGCameraApp/classes18.dex.
+                        val vendorKey = CaptureRequest.Key(
+                            LgG6Main0Probe.VENDOR_ZOOM, Float::class.javaObjectType)
+                        options.setCaptureRequestOption(vendorKey, lg0CropZoom)
+                    } else Log.w(TAG, "LG vendor zoom not advertised by camera0; standard crop only")
+                }
+            }
+            if (lgH872Main0 && lg0Peaking) {
+                val manager = ctx.getSystemService(Context.CAMERA_SERVICE) as CameraManager
+                val chars = manager.getCameraCharacteristics("0")
+                if (chars.availableCaptureRequestKeys.any {
+                        it.name == LgG6Main0Probe.VENDOR_PEAKING
+                    }) {
+                    // Exact Java Integer type recovered from LGCameraApp/classes18.dex.
+                    val peakingKey = CaptureRequest.Key(
+                        LgG6Main0Probe.VENDOR_PEAKING, Int::class.javaObjectType)
+                    options.setCaptureRequestOption(peakingKey, 1)
+                } else Log.w(TAG, "LG focus peaking tag not advertised by camera0")
+            }
+            val maxDiopters = info.getCameraCharacteristic(
+                CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE) ?: 0f
+            val focusD = if (lgH872Main0 && preciseFocusDiopters != null) {
+                preciseFocusDiopters!!.coerceIn(0f, maxDiopters)
+            } else manualFocus?.times(maxDiopters)
+            if (focusD != null && maxDiopters > 0f) {
                 options.setCaptureRequestOption(
                     CaptureRequest.CONTROL_AF_MODE, CameraMetadata.CONTROL_AF_MODE_OFF)
-                options.setCaptureRequestOption(
-                    CaptureRequest.LENS_FOCUS_DISTANCE, norm * maxDiopters)
+                options.setCaptureRequestOption(CaptureRequest.LENS_FOCUS_DISTANCE, focusD)
             }
             val iso = manualIso
             val shutterUs = manualShutterUs
@@ -457,14 +518,36 @@ class CameraXCapture(
                         CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)
                     val shutterRange = info.getCameraCharacteristic(
                         CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)
-                    val shutterNs = shutterUs.coerceIn(1L, 1_000_000L) * 1000L
+                    val shutterNs = if (lgH872Main0) {
+                        val fps = androidx.preference.PreferenceManager.getDefaultSharedPreferences(ctx)
+                            .getString("stream_fps", "20")?.toIntOrNull()?.coerceIn(1, 60) ?: 20
+                        val lo = shutterRange?.lower ?: 20651L
+                        val hi = shutterRange?.upper ?: 33_025_763_644L
+                        LgG6Main0Math.exposureForFps(shutterUs, fps, lo, hi)
+                    } else shutterUs.coerceIn(1L, 1_000_000L) * 1000L
                     options.setCaptureRequestOption(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
+                    if (lgH872Main0) {
+                        val fps = androidx.preference.PreferenceManager.getDefaultSharedPreferences(ctx)
+                            .getString("stream_fps", "20")?.toIntOrNull()?.coerceIn(1, 60) ?: 20
+                        options.setCaptureRequestOption(
+                            CaptureRequest.SENSOR_FRAME_DURATION, 1_000_000_000L / fps)
+                    }
                     options.setCaptureRequestOption(
                         CaptureRequest.SENSOR_SENSITIVITY,
                         isoRange?.let { iso.coerceIn(it.lower, it.upper) } ?: iso)
                     options.setCaptureRequestOption(
                         CaptureRequest.SENSOR_EXPOSURE_TIME,
                         shutterRange?.let { shutterNs.coerceIn(it.lower, it.upper) } ?: shutterNs)
+                    // This is post-RAW *digital gain*, not analog ISO 1600/3200.
+                    // Never request a boost on other phones or with AE enabled.
+                    if (lgH872Main0) postRawBoostPercent?.let { boost ->
+                        info.getCameraCharacteristic(
+                            CameraCharacteristics.CONTROL_POST_RAW_SENSITIVITY_BOOST_RANGE)?.let { range ->
+                            options.setCaptureRequestOption(
+                                CaptureRequest.CONTROL_POST_RAW_SENSITIVITY_BOOST,
+                                boost.coerceIn(range.lower, range.upper))
+                        }
+                    }
                 } else {
                     Log.w(TAG, "Manual sensor exposure unavailable for selected Camera2 camera")
                 }
@@ -478,6 +561,35 @@ class CameraXCapture(
     @OptIn(ExperimentalCamera2Interop::class)
     override fun setManualFocus(distance: Float) {
         manualFocus = distance.takeIf { it >= 0f }?.coerceIn(0f, 1f)
+        preciseFocusDiopters = null
+        applyAdvancedCaptureRequest()
+    }
+
+    override fun setManualFocusDiopters(diopters: Float?) {
+        if (!lgH872Main0) return
+        manualFocus = null
+        preciseFocusDiopters = diopters?.takeIf { it.isFinite() }?.coerceIn(0f, 10f)
+        applyAdvancedCaptureRequest()
+    }
+
+    override fun setPostRawBoost(percent: Int?) {
+        if (!lgH872Main0) return
+        postRawBoostPercent = percent?.takeIf { it in 100..3199 }
+        applyAdvancedCaptureRequest()
+    }
+
+    override fun setLg0SensorCrop(mode: String?, zoom: Float, x: Float, y: Float) {
+        if (!lgH872Main0) return
+        lg0CropMode = mode?.takeIf { it == "sensor" || it == "vendor" }
+        lg0CropZoom = zoom.coerceIn(1f, 8f)
+        lg0CropX = x.coerceIn(0f, 1f)
+        lg0CropY = y.coerceIn(0f, 1f)
+        applyAdvancedCaptureRequest()
+    }
+
+    override fun setLg0VendorPeaking(enabled: Boolean) {
+        if (!lgH872Main0) return
+        lg0Peaking = enabled
         applyAdvancedCaptureRequest()
     }
 
@@ -499,8 +611,17 @@ class CameraXCapture(
         val id = logicalCameraId?.takeIf { it in cm.cameraIdList }
             ?: cm.cameraIdList.firstOrNull { cm.getCameraCharacteristics(it).get(CameraCharacteristics.LENS_FACING) == want }
             ?: cm.cameraIdList.first()
-        cm.getCameraCharacteristics(id).get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES)
-            ?.maxWithOrNull(compareBy({ it.upper - it.lower }, { it.upper }))
+        val ranges = cm.getCameraCharacteristics(id).get(
+            CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES) ?: emptyArray<Range<Int>>()
+        if (lgH872Main0) {
+            val fps = androidx.preference.PreferenceManager.getDefaultSharedPreferences(ctx)
+                .getString("stream_fps", "20")?.toIntOrNull()?.coerceIn(1, 60) ?: 20
+            // Prefer the narrowest range whose bounds include target FPS;
+            // an AE min of 30 forces 30fps and increases heat on a static scene.
+            ranges.filter { it.lower <= fps && it.upper >= fps }
+                .minWithOrNull(compareBy({ it.upper - it.lower }, { it.upper }))
+                ?: ranges.minByOrNull { kotlin.math.abs(it.upper - fps) }
+        } else ranges.maxWithOrNull(compareBy({ it.upper - it.lower }, { it.upper }))
     } catch (e: Exception) { Log.e(TAG, "aeRange: ${e.message}"); null }
 
     override fun stop() {
@@ -510,6 +631,7 @@ class CameraXCapture(
         try { provider?.unbindAll() } catch (_: Exception) {}
         try { analysisExec.shutdown() } catch (_: Exception) {}
         provider = null; camera = null; imageCapture = null
+        if (lgH872Main0) LgG6Main0Probe.clear()
     }
 
     companion object {
