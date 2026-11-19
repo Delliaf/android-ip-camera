@@ -2569,7 +2569,8 @@ class StreamingService : LifecycleService() {
                 }
             }
             "api" -> {
-                if (value in listOf("auto", "camerax", "camera1")) {
+                if (value in listOf("auto", "camerax", "camera1", "lg-main0-direct") &&
+                    (value != "lg-main0-direct" || LgG6Main0Profile.isTarget(id))) {
                     prefs.edit().putString("capture_api", value).apply()
                     // Explicitly choosing CameraX again re-tests the device (clears the remembered
                     // CameraX starts without frames).
