@@ -78,9 +78,23 @@ internal class LgG6Main0DirectCapture(
     private var profile = LgG6PreviewProfile.PHOTO_ZSL
     private val resultCallback = object : CameraCaptureSession.CaptureCallback() {
         private var n = 0
+        private var unsupportedManualIsoFrames = 0
         override fun onCaptureCompleted(sess: CameraCaptureSession,
                                         request: CaptureRequest, result: TotalCaptureResult) {
             lastFrameAtMs = SystemClock.elapsedRealtime()
+            val requested = request.get(CaptureRequest.SENSOR_SENSITIVITY)
+            val actual = result.get(android.hardware.camera2.CaptureResult.SENSOR_SENSITIVITY)
+            val aeOff = request.get(CaptureRequest.CONTROL_AE_MODE) == CaptureRequest.CONTROL_AE_MODE_OFF
+            val reportedMax = characteristics.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)?.upper ?: 800
+            if (allowExtendedIso && aeOff && requested != null && requested > reportedMax &&
+                actual != null && actual < requested * .90) {
+                unsupportedManualIsoFrames++
+                if (unsupportedManualIsoFrames >= 30) {
+                    unsupportedManualIsoFrames = 0
+                    disableExtendedIso("Camera0 requested ISO $requested but returned $actual; " +
+                        "manual ISO above $reportedMax not confirmed")
+                }
+            } else unsupportedManualIsoFrames = 0
             if (++n % 30 == 0) {
                 LgG6Main0Telemetry.report(request, result, profile.wireName)
                 Log.i(TAG, "source=${sourceSize.width}x${sourceSize.height}; profile=${profile.wireName}")
@@ -171,6 +185,19 @@ internal class LgG6Main0DirectCapture(
     override fun setLgVendorZoom(zoom: Float?) { /* Vendor key is not advertised on H872 ID0. */ }
     override fun setLgPostRawBoost(percent: Int?) { mutate { postRawGain = percent ?: 100 } }
     override fun setLgExtendedIso(enabled: Boolean) { mutate { allowExtendedIso = enabled } }
+
+    private fun disableExtendedIso(reason: String) {
+        // All callers execute on the Camera0 handler. Keep the camera running
+        // and retry in standard 50..800 mode instead of killing the RTSP stream.
+        if (!allowExtendedIso || closed) return
+        Log.w(TAG, "Extended manual ISO rejected: $reason")
+        onStatus("Extended ISO fallback: $reason")
+        allowExtendedIso = false
+        androidx.preference.PreferenceManager.getDefaultSharedPreferences(context)
+            .edit().putBoolean(LgG6Main0Profile.PREF_EXTENDED_ISO, false).apply()
+        handler.removeCallbacks(applyPending)
+        handler.post(applyPending)
+    }
     override fun setLgFocusPeaking(enabled: Boolean) { /* Not advertised on the tested ID0 HAL. */ }
     override fun setLgPreviewProfile(profile: String) {
         mutate { this.profile = LgG6PreviewProfile.parse(profile) }
@@ -237,7 +264,11 @@ internal class LgG6Main0DirectCapture(
                 }
             } else {
                 b.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
-                b.set(CaptureRequest.CONTROL_AE_EXPOSURE_COMPENSATION, ev)
+                val compensationRange = characteristics.get(
+                CameraCharacteristics.CONTROL_AE_COMPENSATION_RANGE)
+            val compensated = if (compensationRange == null) ev
+                else ev.coerceIn(compensationRange.lower, compensationRange.upper)
+            b.set(CaptureRequest.CONTROL_AE_EXPOSURE_COMPENSATION, compensated)
                 val ranges = characteristics.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES)
                 ranges?.firstOrNull { it.lower <= fps && it.upper >= fps }?.let {
                     b.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, it)
@@ -245,6 +276,12 @@ internal class LgG6Main0DirectCapture(
             }
             s.setRepeatingRequest(b.build(), resultCallback, handler)
         } catch (e: Exception) {
+            val sensitivityMax = characteristics.get(
+                CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)?.upper ?: 800
+            if (allowExtendedIso && iso != null && shutterUs != null && iso!! > sensitivityMax) {
+                disableExtendedIso("HAL error for ISO $iso: ${e.message}")
+                return
+            }
             failed = true
             onStatus("Direct capture request failed: ${e.message}")
             Log.e(TAG, "setRepeatingRequest", e)
