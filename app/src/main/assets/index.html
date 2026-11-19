@@ -626,6 +626,9 @@
               <option value="2560x1440">Request 2560×1440 source</option>
               <option value="3840x2160">Request 3840×2160 (4K) source</option>
               <option value="4160x2340">Request 4160×2340 · LG Camera0 16:9 YUV</option>
+              <option value="4160x3120">Request 4160×3120 · full 4:3 13MP photo source</option>
+              <option value="4000x3000">Request 4000×3000 · 12MP experiment (HAL fallback)</option>
+              <option value="3264x2448">Request 3264×2448 · 8MP comparison</option>
             </select>
             <small>For the highest detail: output 1920×1080, request 4K source, then crop. Camera2 may negotiate a lower source size; Camera1 fallback is limited by its preview size. MJPEG uses the source ImageAnalysis frame when available.</small>
             <small id="captureDiagnostics" aria-live="polite">Captured source: waiting for camera frames</small>
@@ -707,11 +710,15 @@
                 <option value="manual">Manual ISO + shutter</option>
               </select>
               <div id="manualExposureControls" hidden>
-                <label for="manualIso">ISO</label>
-                <input type="number" id="manualIso" min="25" max="3200" step="1" value="400" data-control="manual_iso">
-                <label for="manualShutterUs">Shutter time (µs)</label>
-                <input type="number" id="manualShutterUs" min="100" max="1000000" step="100" value="20000" data-control="manual_shutter_us">
-                <small>10000 µs = 1/100 s · 20000 µs = 1/50 s. Long exposures reduce FPS.</small>
+                <label for="manualIsoSlider">ISO <span id="manualIsoBadge" class="val-badge">400</span></label>
+                <input type="range" id="manualIsoSlider" min="50" max="800" step="1" value="400">
+                <label for="manualIso">ISO exact value</label>
+                <input type="number" id="manualIso" min="50" max="800" step="1" value="400" data-control="manual_iso">
+                <label for="manualShutterSlider">Shutter <span id="manualShutterBadge" class="val-badge">1/50 s</span></label>
+                <input type="range" id="manualShutterSlider" min="0" max="1000" step="1" value="520">
+                <label for="manualShutterUs">Shutter exact time (µs)</label>
+                <input type="number" id="manualShutterUs" min="100" max="1000000" step="1" value="20000" data-control="manual_shutter_us">
+                <small>Logarithmic shutter slider for fine adjustment. 10000 µs = 1/100 s; long exposures reduce FPS. Actual results are in CaptureResult telemetry.</small>
               </div>
               <small id="manualExposureStatus" aria-live="polite"></small>
             </div>
@@ -1220,6 +1227,7 @@
           shutter.max = String(caps.shutterMaxUs || 1000000);
         }
       }
+      updateManualExposureSliders();
       if (notice) notice.textContent = supported
         ? 'Camera2 MANUAL_SENSOR available. Select CameraX if using the legacy Camera1 capture backend.'
         : 'Manual ISO/shutter unavailable on this camera (Camera2 MANUAL_SENSOR not advertised).';
@@ -1342,6 +1350,47 @@
       });
 
       if (badge) badge.innerText = formatControlValue(el);
+    }
+
+    // Keep manual numeric fields as canonical controls; sliders feed them through
+    // the existing throttled control sender and therefore share the same persistence.
+    function updateManualExposureSliders() {
+      const iso = getElById('manualIso'), isoSlider = getElById('manualIsoSlider');
+      const shutter = getElById('manualShutterUs'), shutterSlider = getElById('manualShutterSlider');
+      const isoBadge = getElById('manualIsoBadge'), shutterBadge = getElById('manualShutterBadge');
+      if (iso && isoSlider) {
+        isoSlider.min = String(iso.min || 50);
+        isoSlider.max = String(iso.max || 800);
+        if (document.activeElement !== isoSlider)
+          isoSlider.value = String(Math.max(+isoSlider.min, Math.min(+isoSlider.max, +iso.value || 50)));
+        if (isoBadge) isoBadge.textContent = iso.value || '–';
+      }
+      if (shutter && shutterSlider) {
+        const low = Math.max(1, +shutter.min || 100), high = Math.max(low+1, +shutter.max || 1_000_000);
+        const exposure = Math.max(low, Math.min(high, +shutter.value || 20000));
+        if (document.activeElement !== shutterSlider)
+          shutterSlider.value = String(Math.round(1000*Math.log(exposure/low)/Math.log(high/low)));
+        if (shutterBadge) shutterBadge.textContent = (exposure < 1_000_000
+          ? '1/' + Math.round(1_000_000/exposure) + ' s' : (exposure/1_000_000).toFixed(2)+' s')
+          + ' (' + Math.round(exposure/1000) + ' ms)';
+      }
+    }
+    for (const [sliderId, numericId] of [['manualIsoSlider','manualIso'],['manualShutterSlider','manualShutterUs']]) {
+      const slider = getElById(sliderId), field = getElById(numericId);
+      if (!slider || !field) continue;
+      for (const eventType of ['input','change'])
+        slider.addEventListener(eventType, () => {
+          if (sliderId === 'manualIsoSlider') field.value = slider.value;
+          else {
+            const low = Math.max(1, +field.min || 100), high = Math.max(low+1, +field.max || 1_000_000);
+            const x = (+slider.value / 1000);
+            field.value = String(Math.round(low * Math.pow(high / low, x)));
+          }
+          field.dispatchEvent(new Event(eventType, {bubbles: true}));
+          updateManualExposureSliders();
+        });
+      field.addEventListener('input', updateManualExposureSliders);
+      field.addEventListener('change', updateManualExposureSliders);
     }
 
     document.querySelectorAll('[data-control]').forEach(bindControl);
