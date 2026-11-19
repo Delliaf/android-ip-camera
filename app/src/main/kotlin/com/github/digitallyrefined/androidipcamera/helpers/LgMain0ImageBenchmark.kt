@@ -431,12 +431,15 @@ internal class LgMain0ImageBenchmark(private val context: Context) {
                 "index,id,status,pipeline,template,width,height,isoActual,shutterNsActual," +
                 "focusDiopters,NRActual,EDGEActual,meanLuma,contrastStdDev,p01,p99," +
                 "blackClippingPct,whiteClippingPct,edgeEnergy,laplacianVariance," +
-                "temporalLumaAbsDiff,timestampMatched,error\\n")
+                "temporalLumaAbsDiff,timestampMatched,error").append(10.toChar())
             for (i in 0 until rows.length()) {
                 val o = rows.getJSONObject(i)
                 val m = o.optJSONObject("imageMetrics")
                 val actual = o.optJSONObject("captureResult")
-                fun csvField(value: String): String = "\\\"" + value.replace("\\\"", "\\\"\\\"") + "\\\""
+                fun csvField(value: String): String {
+                    val quote = 34.toChar().toString()
+                    return quote + value.replace(quote, quote + quote) + quote
+                }
                 val cells = listOf(
                     o.optInt("index").toString(), csvField(o.optString("id")),
                     csvField(o.optString("status")), csvField(o.optString("pipeline")),
@@ -458,7 +461,7 @@ internal class LgMain0ImageBenchmark(private val context: Context) {
                     o.optBoolean("captureResultTimestampMatched").toString(),
                     csvField(o.optString("error"))
                 )
-                csv.append(cells.joinToString(",")).append('\\n')
+                csv.append(cells.joinToString(",")).append(10.toChar())
             }
             write("results.csv", csv.toString().toByteArray(Charsets.UTF_8))
             write("README.txt", (
