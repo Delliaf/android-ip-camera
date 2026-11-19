@@ -61,6 +61,22 @@ jobs:
           chmod +x ./gradlew
           ./gradlew :app:testDebugUnitTest :app:assembleDebug --no-daemon --max-workers=2
 
+      - name: Verify APK contains only arm64-v8a JNI libraries
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          apks=(app/build/outputs/apk/debug/*.apk)
+          test "${#apks[@]}" -eq 1
+          apk="${apks[0]}"
+          unzip -Z1 "$apk" | grep -q '^lib/arm64-v8a/'
+          unexpected="$(unzip -Z1 "$apk" | grep '^lib/' | grep -v '^lib/arm64-v8a/' || true)"
+          if [ -n "$unexpected" ]; then
+            echo "Unexpected non-arm64 libraries:"
+            echo "$unexpected"
+            exit 1
+          fi
+          echo "APK JNI ABI verified: arm64-v8a only"
+
       - name: Upload installable debug APK
         if: success()
         uses: actions/upload-artifact@v4
