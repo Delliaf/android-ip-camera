@@ -630,7 +630,7 @@
               <option value="4000x3000">Request 4000×3000 · 12MP experiment (HAL fallback)</option>
               <option value="3264x2448">Request 3264×2448 · 8MP comparison</option>
             </select>
-            <small>For the highest detail: output 1920×1080, request 4K source, then crop. Camera2 may negotiate a lower source size; Camera1 fallback is limited by its preview size. MJPEG uses the source ImageAnalysis frame when available.</small>
+            <small>High-resolution photo source and encoded output are independent. For LG Main0 prefer 4160×3120 input with 960×720 (4:3) or 768×768 (1:1) H.264 output at 4×. The actual CameraX/Camera2 negotiated size may be smaller than requested.</small>
             <small id="captureDiagnostics" aria-live="polite">Captured source: waiting for camera frames</small>
 
             <label for="roiZoom">Source ROI zoom <span class='val-badge' id='roiZoomVal'>1×</span></label>
@@ -667,10 +667,17 @@
                 <option value="fast">FAST noise reduction + edges</option>
                 <option value="hq">HIGH QUALITY noise reduction + edges (slower)</option>
               </select>
+              <label for="lgMain0OutputShape">Encoded output aspect · independent of photo sensor</label>
+              <select id="lgMain0OutputShape" data-control="lg_main0_output_shape">
+                <option value="4:3">4:3 · 960×720 (recommended, full 13MP aspect)</option>
+                <option value="1:1">1:1 · 768×768 (square, no upscaling at 4×)</option>
+                <option value="16:9">16:9 · 960×540 (optional)</option>
+              </select>
+              <small>Source 4160×3120 is 4:3. At 4×, the 4:3 ROI contains ~1040×780 native pixels; the 1:1 ROI ~780×780. Neither requires 16:9.</small>
               <div style="display:flex; gap:6px; flex-wrap:wrap; margin:12px 0;">
-                <button id="lgPresetIsp" class="btn" type="button">ISP 4× · 960×540</button>
-                <button id="lgPresetGpu" class="btn" type="button">4K GPU ROI 4×</button>
-                <button id="lgPresetSafe" class="btn" type="button">1× safe</button>
+                <button id="lgPresetIsp" class="btn" type="button">ISP 4× · chosen aspect</button>
+                <button id="lgPresetGpu" class="btn" type="button">13MP GPU ROI 4×</button>
+                <button id="lgPresetSafe" class="btn" type="button">1× · chosen aspect</button>
               </div>
               <label for="lgMain0ZoomMode">Zoom mode — never combine ISP and GPU zoom</label>
               <select id="lgMain0ZoomMode" data-control="lg_main0_zoom_mode">
@@ -1194,6 +1201,7 @@
       const settings = data?.settings || {};
       const controls = {
         lgMain0Backend: settings.api === 'lg-main0-direct' ? 'lg-main0-direct' : 'camerax',
+        lgMain0OutputShape: settings.lgOutputShape,
         lgMain0PreviewProfile: settings.lgPreviewProfile,
         lgMain0Processing: settings.lgProcessing,
         lgMain0ExtendedIso: settings.lgExtendedIso === true ? 'true' : 'false',
@@ -1438,7 +1446,7 @@
         setTimeout(() => loadDeviceInfo(true), 1200);
       });
     }
-    for (const id of ['lgMain0Backend', 'lgMain0Processing', 'lgMain0ExtendedIso',
+    for (const id of ['lgMain0Backend', 'lgMain0OutputShape', 'lgMain0Processing', 'lgMain0ExtendedIso',
                       'lgMain0ZoomMode',
                       'lgMain0FocusMode', 'lgMain0FocusDiopters', 'lgMain0Zoom'])
       getElById(id)?.addEventListener('input', () => updateLgMain0Ui({settings: {}}, false));
