@@ -657,6 +657,12 @@
               <input type="range" id="lgMain0DirectGamma" min="0.45" max="1.5" step="0.05" value="0.80"
                   data-control="lg_main0_direct_gamma" data-badge="lgDirectGammaVal">
               <small>0.45 = brighter dark tones, 0.80 = default correction, 1.00 = original untouched output; values above 1.00 darken. GPU-only tone correction, not sensor ISO or real extra detail. For true A/B comparison set 1.00.</small>
+              <label for="lgMain0DirectAeFps">Direct Camera2 AE shutter freedom</label>
+              <select id="lgMain0DirectAeFps" data-control="lg_main0_direct_ae_fps">
+                <option value="adaptive">Adaptive 2–30 FPS · brighter in low light (recommended)</option>
+                <option value="fixed">Fixed target FPS · smoother, may be very dark</option>
+              </select>
+              <small>LG camera0 exposes fixed [15,15] and wide [2,30] AE ranges. The old Direct backend mistakenly picked the first matching range and locked the shutter to 1/15s. Adaptive now matches CameraX. Camera FPS can drop in very low light, while H.264 output remains capped at its configured FPS.</small>
               <label for="lgMain0PreviewProfile">Direct Camera2 repeating-request template</label>
               <select id="lgMain0PreviewProfile" data-control="lg_main0_preview_profile">
                 <option value="zsl">Photo ZSL template 5 · OEM photo-mode A/B</option>
@@ -1208,6 +1214,7 @@
         lgMain0OutputShape: settings.lgOutputShape,
         lgMain0PreviewProfile: settings.lgPreviewProfile,
         lgMain0DirectGamma: settings.lgDirectGamma,
+        lgMain0DirectAeFps: settings.lgDirectAeFps,
         lgMain0Processing: settings.lgProcessing,
         lgMain0ExtendedIso: settings.lgExtendedIso === true ? 'true' : 'false',
         lgMain0ZoomMode: settings.lgZoomMode,
@@ -1227,6 +1234,8 @@
       if (profile) profile.disabled = !direct;
       const gamma = getElById('lgMain0DirectGamma');
       if (gamma) gamma.disabled = !direct;
+      const aeFps = getElById('lgMain0DirectAeFps');
+      if (aeFps) aeFps.disabled = !direct;
       const processing = getElById('lgMain0Processing');
       if (processing) processing.disabled = direct;
       updateManualExposureUi();
@@ -1456,7 +1465,8 @@
         setTimeout(() => loadDeviceInfo(true), 1200);
       });
     }
-    for (const id of ['lgMain0Backend', 'lgMain0DirectGamma', 'lgMain0OutputShape',
+    for (const id of ['lgMain0Backend', 'lgMain0DirectGamma', 'lgMain0DirectAeFps',
+                      'lgMain0OutputShape',
                       'lgMain0Processing', 'lgMain0ExtendedIso',
                       'lgMain0ZoomMode',
                       'lgMain0FocusMode', 'lgMain0FocusDiopters', 'lgMain0Zoom'])
