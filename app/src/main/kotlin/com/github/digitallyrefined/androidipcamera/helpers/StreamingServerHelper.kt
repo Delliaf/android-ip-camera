@@ -1496,6 +1496,7 @@ class StreamingServerHelper(
         val cameraId: String?,
         val resolution: String,
         val streamRes: String,
+        val api: String,
         val fps: String,
         val torch: String,
         val deviceHasFlash: Boolean,
@@ -1523,6 +1524,8 @@ class StreamingServerHelper(
         val lgPostRawBoost: String,
         val lgPeaking: Boolean,
         val lgTelemetry: Boolean,
+        val lgProcessing: String,
+        val lgPreviewProfile: String,
     )
 
     private data class DeviceInfo(
@@ -1602,6 +1605,7 @@ class StreamingServerHelper(
                 put("cameraId", settings.cameraId)
                 put("resolution", settings.resolution)
                 put("streamRes", settings.streamRes)
+                put("api", settings.api)
                 put("fps", settings.fps)
                 put("torch", settings.torch)
                 // Whether ANY rear lens can drive the flash — the torch is a device-level unit,
@@ -1632,6 +1636,8 @@ class StreamingServerHelper(
                 put("lgPostRawBoost", settings.lgPostRawBoost)
                 put("lgPeaking", settings.lgPeaking)
                 put("lgTelemetry", settings.lgTelemetry)
+                put("lgProcessing", settings.lgProcessing)
+                put("lgPreviewProfile", settings.lgPreviewProfile)
                 put("lgCaptureResult", if (settings.lgTelemetry &&
                     android.os.SystemClock.elapsedRealtime() - LgG6Main0Telemetry.lastUpdatedMs < 5000L)
                     LgG6Main0Telemetry.lastSummary else "telemetry disabled or waiting for new frames")
@@ -1784,6 +1790,7 @@ class StreamingServerHelper(
             cameraId = cameraId,
             resolution = prefs.getString("camera_resolution", "low") ?: "low",
             streamRes = prefs.getString("stream_res", "auto") ?: "auto",
+            api = prefs.getString("capture_api", "auto") ?: "auto",
             fps = prefs.getString("stream_fps", "30") ?: "30",
             torch = prefs.getString("camera_torch", "off") ?: "off",
             deviceHasFlash = anyBackCameraWithFlash(),
@@ -1823,6 +1830,8 @@ class StreamingServerHelper(
             lgPostRawBoost = prefs.getString(LgG6Main0Profile.PREF_POST_RAW_BOOST, "100") ?: "100",
             lgPeaking = prefs.getBoolean(LgG6Main0Profile.PREF_PEAKING, false),
             lgTelemetry = prefs.getBoolean(LgG6Main0Profile.PREF_TELEMETRY, false),
+            lgProcessing = prefs.getString("lg_main0_processing", "off") ?: "off",
+            lgPreviewProfile = prefs.getString("lg_main0_preview_profile", "zsl") ?: "zsl",
         )
     }
 
