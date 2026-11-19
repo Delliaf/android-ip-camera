@@ -61,6 +61,8 @@ internal class LgG6Main0Telemetry : CameraCaptureSession.CaptureCallback() {
             val summary = "profile=$profile AE=" + (if (aeOn) "AUTO" else "MANUAL") +
                 " aeState=" + result.get(CaptureResult.CONTROL_AE_STATE) +
                 " aeComp=" + request.get(CaptureRequest.CONTROL_AE_EXPOSURE_COMPENSATION) +
+                " aeFpsReq=" + request.get(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE) +
+                " aeFpsActual=" + result.get(CaptureResult.CONTROL_AE_TARGET_FPS_RANGE) +
                 " " + LgG6PhotoPreviewTuning.readback(result) +
                 " requestISO=" + (if (aeOn) "ignored(template=$requestedISO)" else "$requestedISO") +
                 " requestShutterNs=" + (if (aeOn) "ignored(template=$requestedShutter)" else "$requestedShutter") +
