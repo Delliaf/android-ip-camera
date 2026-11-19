@@ -34,5 +34,9 @@ interface CaptureBackend {
      * Legacy Camera1 implementations do not support this; Camera2 will check MANUAL_SENSOR.
      */
     fun setManualExposure(iso: Int?, shutterUs: Long?) {}
+    /** Precise Camera2 focus; null restores autofocus. No effect for Camera1 fallback. */
+    fun setManualFocusDiopters(diopters: Float?) {}
+    /** Digital gain after RAW, distinct from the sensor's ISO limit. Null disables it. */
+    fun setPostRawBoost(percent: Int?) {}
     fun stop()
 }
