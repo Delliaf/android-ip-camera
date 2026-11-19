@@ -1080,6 +1080,7 @@ class StreamingService : LifecycleService() {
     private fun chooseApi(): String =
         when (val pref = PreferenceManager.getDefaultSharedPreferences(this).getString("capture_api", "auto") ?: "auto") {
             "camerax", "camera1" -> pref
+            "lg-main0-direct" -> if (LgG6Main0Profile.isTarget(camId())) pref else "camerax"
             else -> if (isLegacy()) "camera1" else "camerax"
         }
 
@@ -1221,6 +1222,7 @@ class StreamingService : LifecycleService() {
     private fun cameraDelivering(): Boolean {
         val lastFrameAt = when (val b = backend) {
             is CameraXCapture -> b.lastFrameAtMs
+            is LgG6Main0DirectCapture -> b.lastFrameAtMs
             is Camera1Capture -> glPipe?.lastFrameAtMs ?: 0L
             else -> 0L
         }
@@ -1354,8 +1356,34 @@ class StreamingService : LifecycleService() {
             // never configures ImageAnalysis/ImageCapture. The backend choice only matters when
             // frames are actually needed (clients / recording / snapshot in flight): then honor the
             // API preference and a recent CameraX start without frames, which route to the Camera1 backend.
-            val useCamera1 = demand.frames && (chooseApi() == "camera1" || cameraXMissed)
-            if (useCamera1) {
+            val directSelected = chooseApi() == "lg-main0-direct" &&
+                LgG6Main0Profile.isTarget(camera) && surfaceEncoder && demand.h264 &&
+                !demand.mjpegViewers && !demand.motion && !demand.snapshot &&
+                !demand.screenPreview
+            val useCamera1 = !directSelected && demand.frames &&
+                (chooseApi() == "camera1" || cameraXMissed)
+            if (directSelected) {
+                val source = sourceCaptureSize(want)
+                try {
+                    startLgMain0DirectBackend(want, source)
+                    val direct = backend as? LgG6Main0DirectCapture
+                    var waited = 0L
+                    while (direct != null && !direct.failed && direct.lastFrameAtMs <= 0L &&
+                           waited < CAMERAX_FRAME_GRACE_MS + 2500L) {
+                        kotlinx.coroutines.delay(100)
+                        waited += 100L
+                    }
+                    if (direct == null || direct.failed || direct.lastFrameAtMs <= 0L) {
+                        Log.w(TAG, "LG0 direct photo-preview failed/no frames, falling back to CameraX")
+                        stopCamera()
+                        startCameraXBackend(source, demand, surfaceEncoder)
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "LG0 direct photo-preview unavailable, CameraX fallback", e)
+                    stopCamera()
+                    startCameraXBackend(source, demand, surfaceEncoder)
+                }
+            } else if (useCamera1) {
                 if (cameraXMissed) {
                     Log.i(TAG, "CameraX recently bound without frames on this device and frames are needed, using Camera1 backend")
                 }
@@ -1492,6 +1520,51 @@ class StreamingService : LifecycleService() {
         }
         backend = cap
         Log.i(TAG, "stream ${camId()} api=camera1 ${cap.chosenW}x${cap.chosenH}")
+    }
+
+    /**
+     * Direct LG-H872 camera0: ONE PRIVATE SurfaceTexture, with OEM PHOTO_ZSL
+     * request-template A/B, feeding the existing GL -> H.264 -> RTSP/ONVIF path.
+     * Incompatible use cases (MJPEG, snapshots, motion analysis, screen preview)
+     * are routed to CameraX before this method is entered.
+     */
+    private fun startLgMain0DirectBackend(want: Size, requestedSource: Size) {
+        val h264 = h264StreamingEncoder ?: throw IllegalStateException("No H264 encoder")
+        val source = LgG6Main0DirectCapture.chooseSource(this, requestedSource)
+            ?: throw IllegalStateException("No PRIVATE Camera0 SurfaceTexture size available")
+        if (source != requestedSource) {
+            Log.w(TAG, "LG0 requested ${requestedSource.width}x${requestedSource.height} not supported " +
+                "as PRIVATE; using ${source.width}x${source.height}")
+        }
+        val fps = streamFps().coerceIn(1, 30)
+        val encoded = surfaceEncoderSize(want)
+        val encoder = H264HardwareEncoder(encoded.width, encoded.height, fps,
+            H264HardwareEncoder.bitrateFor(encoded.width, encoded.height, mainBitrateKbps()),
+            true) { data, key, pts -> h264.broadcastH264(data, key, pts) }
+        h264.setEncoder(encoder)
+        streamingServerHelper?.resetH264Wait()
+        val pipe = CameraGlPipe(encoder.inputSurface!!, encoded.width, encoded.height, fps,
+            standardBuffer = false).also {
+            it.mirror = readMirrorPref()
+            it.rotation = quantizedRotation(readRotatePref())
+            // A 4:3 13MP camera source must fill a 16:9 output without letterboxing.
+            it.cropToFillOutput = true
+            val (xZoom, x, y) = roiConfig()
+            val p = PreferenceManager.getDefaultSharedPreferences(this)
+            it.roiZoom = if (lgMain0ZoomMode(p) == "gpu") lgMain0Zoom(p) else 1f
+            it.roiCenterX = x
+            it.roiCenterY = y
+            it.start()
+            it.setCameraBufferSize(source.width, source.height)
+            cameraXGlPipe = it
+        }
+        val direct = LgG6Main0DirectCapture(this, source, pipe.inputSurface) { msg ->
+            Log.i(TAG, "LG0 Camera2 direct: $msg")
+        }
+        backend = direct
+        direct.start()
+        Log.i(TAG, "LG0 Direct requested=${requestedSource.width}x${requestedSource.height} " +
+            "PRIVATE=${source.width}x${source.height} H264=${encoded.width}x${encoded.height}")
     }
 
     private fun startCameraXBackend(want: Size, demand: CameraDemand, surfaceEncoder: Boolean) {
