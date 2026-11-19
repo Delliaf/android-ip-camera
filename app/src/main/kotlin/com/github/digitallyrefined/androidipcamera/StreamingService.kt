@@ -1166,6 +1166,7 @@ class StreamingService : LifecycleService() {
             .getString("capture_resolution", "match") ?: "match"
         return when (pref) {
             "3840x2160" -> Size(3840, 2160)
+            "4160x2340" -> Size(4160, 2340)
             "2560x1440" -> Size(2560, 1440)
             else -> output
         }
@@ -2259,7 +2260,7 @@ class StreamingService : LifecycleService() {
                         if (value == "gpu4") "gpu" else "isp")
                     .putString(LgG6Main0Profile.PREF_ZOOM, if (value == "safe") "1.0" else "4.0")
                     .putString("stream_res", "960x540")
-                    .putString("capture_resolution", if (value == "gpu4") "3840x2160" else "match")
+                    .putString("capture_resolution", if (value == "gpu4") "4160x2340" else "match")
                     .putString("stream_fps", "15")
                     .putString("stream_bitrate_kbps", "2000")
                     .putString("mjpeg_quality", "90")
@@ -2382,7 +2383,7 @@ class StreamingService : LifecycleService() {
                 }
             }
             "capture_resolution" -> {
-                if (value !in listOf("match", "2560x1440", "3840x2160")) return
+                if (value !in listOf("match", "2560x1440", "3840x2160", "4160x2340")) return
                 prefs.edit().putString("capture_resolution", value).apply()
                 if (localRecorder?.isRecording != true) debouncedStartCamera()
             }
