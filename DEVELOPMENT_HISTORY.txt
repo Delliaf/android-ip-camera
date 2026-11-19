@@ -1,0 +1,160 @@
+LG G6 H872 / android-ip-camera — DEVELOPMENT HISTORY AND HANDOFF
+==============================================================================
+Persistent, plain-text engineering journal. Update in the SAME Git commit as
+each substantive feature, bug fix, CI configuration change, or hardware result.
+Primary purpose: allow another engineer/AI agent to resume WITHOUT chat logs.
+
+REPO AND STATE (2026-11-19)
+---------------------------
+Repository: https://github.com/Delliaf/android-ip-camera
+Work branch: feature/manual-camera-4k-stream
+PR: https://github.com/Delliaf/android-ip-camera/pull/1 (DRAFT; DO NOT MERGE)
+Main branch: intentionally unchanged by experimental Camera0 work.
+Upstream base: DigitallyRefined/android-ip-camera v0.18.0.
+Target hardware: rooted LG G6 LG-H872, Android 8, rear MAIN Camera2 ID "0".
+DO NOT confuse Main ID0 with wide-angle, Camera1 legacy ID3, or physical ID aliases.
+APK/native output requirement: ONLY ARM64-V8A; ARMv7 and universal release forbidden.
+Existing project stack: Kotlin/CameraX/Camera2, GLES SurfaceTexture pipeline,
+hardware H.264, MJPEG, RTSP/RTCP and ONVIF, OpenTunnel Rust/JNI.
+
+MOST RECENT VERIFIED BUILD BEFORE THIS HANDOFF:
+  Commit 55b243cc9f04ab688df34e150c73d4af01d08ea3
+  Debug tests + APK success:
+    https://github.com/Delliaf/android-ip-camera/actions/runs/44529567261
+  Two unsigned ARM64 release APK builds / reproducible compare success:
+    https://github.com/Delliaf/android-ip-camera/actions/runs/44529578809
+  ANOTHER duplicate debug run for the SAME COMMIT FAILED:
+    https://github.com/Delliaf/android-ip-camera/actions/runs/44529577864
+  That failed run showed download/resolution errors across Google Maven/Maven
+  Central ("Could not find" many unrelated dependencies). This was NOT a
+  camera/Kotlin compile failure, as an overlapping run passed for same SHA.
+  Earlier failure at 5029e82b: Kotlin test method name began with "12Mp";
+  fixed in 55b243cc. Earlier ARM64-only build failure: AGP rejects simultaneous
+  ndk.abiFilters and release splits; removed ndk.abiFilters, release splits only.
+  NOT all duplicate CI runs were green; check actual SHA and each job before
+  declaring a new artifact tested.
+
+REQUIREMENTS / USER FEEDBACK
+----------------------------
+- Main Camera0 only. User has ROOT if it genuinely helps, but root-invasive
+  camera HAL/SELinux hacks are NOT allowed by default (risk camera service).
+- Better image quality, especially OEM PHOTO preview over standard 4K VIDEO.
+- Manual ISO and shutter as responsive sliders; focus in diopters.
+- GPU ROI 4x already worked at 4K in real device tests; earlier high-res
+  12MP zoom Main0 did not work correctly.
+- ISP zoom 4x on CameraX 12MP is sharp but appeared to have no denoising.
+- Need try full photo modes ~4000x3000 and 4160x3120; 3264x2448/8MP may be
+  insufficient; request is NOT proof that CameraX delivers that resolution.
+- NEW USER REQUIREMENT 2026-11-19: ***16:9 IS NOT REQUIRED***.
+  4:3 or 1:1 output is acceptable/preferred; DO NOT force the 4:3 full-sensor
+  capture into 16:9. Pick default 4:3/960x720 for main0 4x experiments and
+  offer 1:1/768x768. Geometry must derive from ACTUAL requested output aspect.
+
+PROVEN CAMERA/HAL INFORMATION
+----------------------------
+- Camera2 main ID0 activeArray Rect(8,8,4160,3120), nominal 4152x3112.
+- Camera0 advertised Camera2 manual ISO 50..800, LENS_MIN_FOCUS 10 diopters,
+  MANUAL_SENSOR, max digital zoom 8x, CENTER_ONLY hardware crop.
+- Camera1 legacy ID3 lg-iso-values includes 3200. DOES NOT automatically
+  apply to Camera2 main ID0.
+- **REAL DEVICE RESULT 2026-11-19:** Camera2 AE CaptureResult reports ISO
+  1381..1484 with shutter 41666668ns, frame 41771884ns (~23.9fps),
+  crop Rect(1560,1170-2600,1950), postRawBoost=100, focusD~4.8.
+  This means AUTO can report >800; cannot conclude manual ISO>800 works.
+  Previously manual ISO36 clamped50 and ISO3600 clamped800 in OUR APP.
+  Our experimental extended ISO switch sends up to 3200 only when opted in;
+  compare requested and ACTUAL results in CaptureResult, possibly HAL rejects.
+- LG vendor zoom and focus_peaking keys were found in stock DEX, but device
+  availableCaptureRequestKeys for Camera0 returned FALSE for both. Vendor
+  direct toggles are guarded and may remain unavailable for third-party UID.
+- Stock LG photo preview uses Camera2 createCaptureRequest(
+  TEMPLATE_ZERO_SHUTTER_LAG=5), video mode TEMPLATE_RECORD=3. DEX evidence
+  does not guarantee equivalent OEM image pipeline with template alone.
+  User provided archived library analysis and PHOTO/ZSL handoff. No closed
+  proprietary APK/SO files should be committed to public repo.
+
+IMPLEMENTED EXPERIMENTS ON THE BRANCH
+--------------------------------------
+- CameraX manual ISO+exposure and exact diopter focus with unified request
+  controls, so focus changes should not wipe manual exposure.
+- LIVE ISO & logarithmic exposure sliders in browser with numeric inputs.
+- CaptureResult logging of actual ISO, exposure, frame duration, focus, crop,
+  NR/EDGE and requested ISO, shutter, crop.
+- Exclusive LG zoom selection: CameraX ISP crop OR OpenGL GPU ROI OR optional
+  vendor zoom (last is unsupported on observed Camera0 tags).
+- High-res capture requests: 4160x3120 (~13MP/4:3), 4000x3000 (~12MP/4:3),
+  4160x2340, 3840x2160, 3264x2448.
+- OpenGL RoiCrop.windowForOutput(sourceW,H,outputW,H,zoom,...): no bars, aspect
+  derived from target encoder output; 16:9 was default only due 960x540
+  preset, NOT inherent. CameraX and direct Camera2 share GLES path.
+- Opt-in direct LG Main0 Camera2: one PRIVATE SurfaceTexture, output via
+  existing GLES -> hardware H.264 -> RTSP/ONVIF. It supports REAL
+  TEMPLATE_ZERO_SHUTTER_LAG(5) vs RECORD(3) A/B, PREVIEW and NR/EDGE FAST/HQ.
+  This direct backend intentionally CANNOT provide CameraX ImageAnalysis,
+  MJPEG, still snapshots, motion monitor, or phone-screen Preview concurrently;
+  these force CameraX path. Direct startup with no frame fails over to CameraX.
+- CameraX standard FAST / HIGH_QUALITY NR + EDGE option, where supported;
+  quality/composition on hardware NOT YET verified. These are not OEM solution
+  commands. Actual CaptureResult can contradict request.
+- No proprietary OEM camera binaries in repository; ROOT diagnostic scripts are
+  read-only. Manufacturer libraries not injected into app or camera service.
+- Gradle Rust native target only aarch64-linux-android; release ABI split
+  arm64-v8a only; CI checks debug APK lib/ paths.
+- Windows read-only PowerShell ADB collector:
+    scripts/lg-g6-main0-windows-diagnostics.ps1
+  Shell read-only optional rooted collector:
+    scripts/lg-g6-main0-diagnostics.sh
+- General docs: LG_G6_H872_MAIN0.md, FORK_ANDROID8.md.
+- Unit tests include geometry of ROI and template numeric IDs.
+
+KNOWN ISSUES / PITFALLS
+-----------------------
+1. Last requested output was still 960x540 = 16:9; change defaults to 4:3
+   and allow 1:1 output. Avoid label "4K" for actual 4160x3120 image.
+2. Direct Camera2 PRIVATE size selection chooses closest advertised size,
+   NOT guaranteed exact 4160x3120, log negotiated size; 4000x3000 may not
+   be advertised for PRIVATE. High-res CameraX Preview may also negotiate low.
+3. Main0 advertises CENTER_ONLY crop; hardware ISP cropping can't pan off
+   center; GPU crop can pan. Never stack 4x ISP and 4x GPU.
+4. Crop-to-fill still intentionally removes source area if target aspect
+   differs: 4:3 output from 4:3 source avoids this extra cropping.
+5. For H.264 from 4160x3120 with zoom4, native crop is approximately
+   1040x780. Output ~960x720 (4:3) is appropriate; for square output
+   native crop is ~780x780, output ~768x768 avoids upscaling.
+6. Camera2 ZSL template does NOT prove stock LG denoise/color/edge parity.
+   Follow OEM Preview/HAL tune paths only from actual data, not guesses.
+7. H.264/RTSP/ONVIF might be intact at compile but must be tested physically.
+8. Real 12MP Video/Preview and long run / thermals are NOT verified.
+9. One CI run failed due transient dependency resolution; another identical
+   commit succeeded. Retry transient downloads automatically; avoid duplicate
+   PR + push runs and confusing failed status.
+10. Review manual ISO >800 experiments: HAL may reject requests, cause stalls.
+    Keep disabled by default and provide reliable safe fallback.
+11. Debug APK may fail in-place install against differently signed existing
+    app. Back up settings before uninstalling.
+
+TO RESUME (MANDATORY STEPS FOR THE NEXT ENGINEER/AI)
+----------------------------------------------------
+A. Read THIS FILE and AGENTS.md FIRST, then inspect branch head/PR1.
+B. Read newest GitHub Actions logs for the EXACT head commit; do not mistake
+   a successful run of an old commit for validation of current code.
+C. Check and update this file IN EVERY FUNCTIONAL CHANGE session, including
+   what you changed, verified, what failed and what to do next. Preserve past
+   failures and decisions, append dated entries; do not erase history.
+D. Never commit proprietary LG DLL/SO/APK or sensitive logcat contents.
+E. Guard all OEM features by exact model LG-H872 and Camera2 ID0.
+F. Test 4:3 960x720 and square 768x768 outputs, with actual input
+   resolution telemetry. Add unit tests for both shapes, no forced 16:9.
+G. Download/install the newest artifact and ask for real LG H872 diagnostics
+   if hardware results needed; CI success alone is not device validation.
+H. Keep PR1 DRAFT until user confirms A/B and no regressions.
+
+LAST DEVELOPMENT ENTRY
+----------------------
+2026-11-19: User reported one build failure and requested persistent history.
+Diagnosis: duplicate workflow for SHA 55b243cc; one run passed with artifact,
+another failed fetching Maven dependencies; release reproducibility passed.
+Action planned this session: strengthen CI transient retry, avoid duplicate
+internal PR builds, switch LG 4x preset to 4:3 output, offer 1:1 shape selector,
+test both, update PR and this file with final run SHAs and links.
+==============================================================================
