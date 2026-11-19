@@ -515,6 +515,8 @@
     </div>
 
     <div class='controls-panel loading' id='controlsPanel'>
+      <div id="controlStatus" role="status" aria-live="polite"
+           style="display:none;font-size:12px;padding:6px 8px;overflow-wrap:anywhere;"></div>
       <div class='controls-panel-loading' aria-live='polite'>
         <div class='spinner'></div>
         <span>Loading settings…</span>
@@ -1149,14 +1151,48 @@
       return lastControlTs;
     }
 
-    // Centralized control sender used by data-control bindings and ad-hoc actions.
+    // Explicit control endpoint avoids the "/" dashboard route swallowing
+    // legacy /?zoom and /?focus_distance requests. Verify JSON instead of
+    // silently treating a 200-HTML dashboard response as a successful command.
     function sendControl(param, val) {
+      const status = getElById('controlStatus');
       try {
-        // Update local UI state immediately so the client reflects server-side
-        // changes without needing to re-fetch /info.json.
-        try { updateLocalLensSetting(param, val); } catch (_) { }
-        return fetch('/?' + encodeURIComponent(param) + '=' + encodeURIComponent(val) + '&ts=' + nextControlTs()).catch(() => { });
-      } catch (_) { /* swallow */ }
+        const url = '/control/set?key=' + encodeURIComponent(param) +
+          '&value=' + encodeURIComponent(val) + '&ts=' + nextControlTs();
+        return fetch(url, {method: 'POST', cache: 'no-store', credentials: 'same-origin'})
+          .then(async resp => {
+            const payload = await resp.json().catch(() => null);
+            if (!resp.ok || !payload || payload.ok !== true ||
+                !Array.isArray(payload.keys) || !payload.keys.includes(param)) {
+              throw new Error('HTTP ' + resp.status + ': command not acknowledged');
+            }
+            // Acknowledgement means forwarded to StreamingService, NOT that
+            // Camera2 applied the request. CaptureResult provides proof of that.
+            try { updateLocalLensSetting(param, val); } catch (_) {}
+            if (status) {
+              status.textContent = 'Команда передана: ' + param;
+              status.style.display = 'block';
+              status.style.color = '#238636';
+            }
+            return payload;
+          })
+          .catch(error => {
+            console.warn('Camera control failed:', param, error);
+            if (status) {
+              status.textContent = 'Ошибка управления (' + param + '): ' + error.message;
+              status.style.display = 'block';
+              status.style.color = '#b42318';
+            }
+            return null;
+          });
+      } catch (error) {
+        console.warn('Camera control exception:', param, error);
+        if (status) {
+          status.textContent = 'Ошибка команды: ' + error.message;
+          status.style.display = 'block';
+        }
+        return Promise.resolve(null);
+      }
     }
 
     // ---- Recording mode: on demand / notify only / motion clips / continuous ----
