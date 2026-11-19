@@ -386,7 +386,7 @@ built/tested after these runs succeed; any doc-only HEAD can be newer.
 SESSION 2026-11-19 ~15:25Z — go2rtc ONVIF reset; CPU and temperature overlay
 ==============================================================================
 USER REPORT:
-  go2rtc POST http://192.168.1.38:8000/onvif/device_service
+  go2rtc POST http://PHONE_IP:8000/onvif/device_service
   "read: connection reset by peer". Setting password did not help;
   password is unwanted for trusted LAN. User requested total CPU usage and
   temperature beside existing battery and Wi-Fi and noted other code
