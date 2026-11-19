@@ -46,5 +46,6 @@ interface CaptureBackend {
     fun setLgPhotoProcessing(mode: String) {}
     /** Direct Camera2 repeating-request profile (video/ZSL/default/fast/hq). */
     fun setLgPreviewProfile(profile: String) {}
+    fun setLgExtendedIso(enabled: Boolean) {}
     fun stop()
 }
