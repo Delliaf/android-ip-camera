@@ -1915,6 +1915,10 @@ class StreamingService : LifecycleService() {
                 ?.toIntOrNull()?.takeIf { it > 100 })
             b.setLgFocusPeaking(p.getBoolean(LgG6Main0Profile.PREF_PEAKING, false))
             b.setLgPhotoProcessing(p.getString("lg_main0_processing", "off") ?: "off")
+            b.setLgNoiseReductionMode(p.getString("lg_main0_noise_reduction", LgG6IspModes.AUTO)
+                ?: LgG6IspModes.AUTO)
+            b.setLgEdgeMode(p.getString("lg_main0_edge_mode", LgG6IspModes.AUTO)
+                ?: LgG6IspModes.AUTO)
             b.setLgPreviewProfile(p.getString("lg_main0_preview_profile", "zsl") ?: "zsl")
             b.setLgExtendedIso(p.getBoolean(LgG6Main0Profile.PREF_EXTENDED_ISO, false))
             applyRoiToPipes()
@@ -2409,10 +2413,12 @@ class StreamingService : LifecycleService() {
             "lg_main0_direct_ae_fps", "lg_main0_focus_mode",
             "lg_main0_focus_diopters", "lg_main0_postraw_boost", "lg_main0_peaking",
             "lg_main0_telemetry", "lg_main0_processing", "lg_main0_preview_profile",
-            "lg_main0_extended_iso" -> {
+            "lg_main0_noise_reduction", "lg_main0_edge_mode", "lg_main0_extended_iso" -> {
                 if (!LgG6Main0Profile.isTarget(id)) return
                 val saved = when (key) {
                     "lg_main0_processing" -> value.takeIf { it in listOf("off", "fast", "hq") } ?: return
+                    "lg_main0_noise_reduction" -> value.takeIf { LgG6IspModes.validNoise(it) } ?: return
+                    "lg_main0_edge_mode" -> value.takeIf { LgG6IspModes.validEdge(it) } ?: return
                     "lg_main0_preview_profile" -> value.takeIf {
                         it in listOf("zsl", "video", "default", "fast", "hq") } ?: return
                     "lg_main0_zoom_mode" -> value.takeIf { it in listOf("isp", "gpu", "vendor") } ?: return
