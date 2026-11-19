@@ -44,6 +44,10 @@ interface CaptureBackend {
     fun setLgFocusPeaking(enabled: Boolean) {}
     /** Standard CameraX NR/EDGE choices: off, fast or hq. */
     fun setLgPhotoProcessing(mode: String) {}
+    /** Independent standard Camera2 NR override for LG main0; "auto" preserves template. */
+    fun setLgNoiseReductionMode(mode: String) {}
+    /** Independent standard Camera2 edge enhancement override for LG main0. */
+    fun setLgEdgeMode(mode: String) {}
     /** Direct Camera2 repeating-request profile (video/ZSL/default/fast/hq). */
     fun setLgPreviewProfile(profile: String) {}
     fun setLgExtendedIso(enabled: Boolean) {}
