@@ -23,8 +23,8 @@ android {
         targetSdk 34
         // The release split is arm64-only; Rust builds only aarch64 native code.
         // Do NOT also set ndk.abiFilters: AGP rejects overlapping ABI splits.
-        versionCode 181
-        versionName "0.18.0-delliaf.1"
+        versionCode 182
+        versionName "0.18.0-delliaf.2"
 
         // https://f-droid.org/docs/Reproducible_Builds/#pngs-generated-from-vector-drawables
         vectorDrawables.generatedDensities = []
@@ -116,7 +116,7 @@ android {
     applicationVariants.all { variant ->
         variant.outputs.all { output ->
             def versionName = variant.versionName
-            def abi = output.getFilter(com.android.build.OutputFile.ABI) ?: "universal"
+            def abi = output.getFilter(com.android.build.OutputFile.ABI) ?: "arm64-v8a"
             def buildType = variant.buildType.name
 
             def newApkName = "${project.rootProject.name}-${versionName}-${abi}-${buildType}.apk"
