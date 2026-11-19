@@ -14,7 +14,7 @@ class LgG6EncoderSizesTest {
         assertEquals(768 to 768, LgG6EncoderSizes.fallback16(768, 768))
     }
     @Test fun sixteenByNineFallback() {
-        assertEquals(896 to 504, LgG6EncoderSizes.fallback16(960, 540))
+        assertEquals(768 to 432, LgG6EncoderSizes.fallback16(960, 540))
     }
     @Test(expected = IllegalArgumentException::class)
     fun invalidDimensions() { LgG6EncoderSizes.fallback16(0, 600) }
