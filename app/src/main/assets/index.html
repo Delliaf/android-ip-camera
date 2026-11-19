@@ -681,12 +681,34 @@
                 <option value="fast">PREVIEW + FAST ISP post-processing</option>
                 <option value="hq">PREVIEW + HQ NR/EDGE (may lower FPS)</option>
               </select>
-              <label for="lgMain0Processing">CameraX ISP noise reduction & sharpening</label>
+              <label for="lgMain0Processing">Legacy CameraX combined processing preset</label>
               <select id="lgMain0Processing" data-control="lg_main0_processing">
-                <option value="off">Default CameraX processing</option>
-                <option value="fast">FAST noise reduction + edges</option>
-                <option value="hq">HIGH QUALITY noise reduction + edges (slower)</option>
+                <option value="off">CameraX default ISP</option>
+                <option value="fast">CameraX FAST noise + edges</option>
+                <option value="hq">CameraX HQ noise + edges</option>
               </select>
+              <label for="lgMain0NoiseReduction">Noise reduction · independent hardware Camera2</label>
+              <select id="lgMain0NoiseReduction" data-control="lg_main0_noise_reduction">
+                <option value="auto">Auto · use active Camera2 template / preset</option>
+                <option value="off">OFF (0) · preserve natural detail and noise</option>
+                <option value="fast">FAST (1) · lighter processing</option>
+                <option value="hq">HIGH QUALITY (2) · stronger denoising</option>
+                <option value="minimal">MINIMAL (3) · minimal sensor processing</option>
+                <option value="zsl">ZERO SHUTTER LAG (4) · photo pipeline</option>
+              </select>
+              <label for="lgMain0EdgeMode">Edge sharpening · independent hardware Camera2</label>
+              <select id="lgMain0EdgeMode" data-control="lg_main0_edge_mode">
+                <option value="auto">Auto · use active Camera2 template / preset</option>
+                <option value="off">OFF (0) · no standard edge enhancement</option>
+                <option value="fast">FAST (1) · lighter sharpening</option>
+                <option value="hq">HIGH QUALITY (2) · higher quality enhancement</option>
+                <option value="zsl">ZERO SHUTTER LAG (3) · photo pipeline</option>
+              </select>
+              <small>Applies in BOTH CameraX and Direct Camera2 on LG-H872 Camera0.
+                A/B at fixed light, shutter, ISO and focus; select OFF or MINIMAL
+                to inspect fine textures. Actual NR/EDGE values appear in Camera0
+                CaptureResult telemetry. Standard NR OFF does not necessarily disable
+                Qualcomm's proprietary temporal denoising pipeline.</small>
               <label for="lgMain0OutputShape">Encoded output aspect · independent of photo sensor</label>
               <select id="lgMain0OutputShape" data-control="lg_main0_output_shape">
                 <option value="4:3">4:3 · 960×720 (recommended, full 13MP aspect)</option>
@@ -1260,6 +1282,8 @@
         lgMain0DirectGamma: settings.lgDirectGamma,
         lgMain0DirectAeFps: settings.lgDirectAeFps,
         lgMain0Processing: settings.lgProcessing,
+        lgMain0NoiseReduction: settings.lgNoiseReduction,
+        lgMain0EdgeMode: settings.lgEdgeMode,
         lgMain0ExtendedIso: settings.lgExtendedIso === true ? 'true' : 'false',
         lgMain0ZoomMode: settings.lgZoomMode,
         lgMain0Zoom: settings.lgZoom,
