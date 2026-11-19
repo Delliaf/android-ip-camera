@@ -108,6 +108,7 @@ class CameraXCapture(
     @Volatile private var lgPostRawBoost: Int? = null
     @Volatile private var lgFocusPeaking = false
     @Volatile private var lgPhotoProcessing = "off"
+    @Volatile private var lgExtendedIso = false
     private val isLgMain0: Boolean get() = LgG6Main0Profile.isTarget(logicalCameraId)
     @Volatile private var lastNv21CachedAtMs = 0L
     private val main = ContextCompat.getMainExecutor(ctx)
@@ -478,7 +479,12 @@ class CameraXCapture(
                     && isoRange != null && expRange != null) {
                     // LG camera0 advertises ISO 50..800. Values above 800 are NOT
                     // authenticated by legacy Camera1 ID3's lg-iso-values string.
-                    val actualIso = iso.coerceIn(isoRange.lower, isoRange.upper)
+                    // Auto Camera0 results can report ISO ~1400 while manual metadata
+                    // says <=800. Test manual 1600/3200 ONLY when user explicitly
+                    // enables the experimental flag; report requested vs actual ISO.
+                    val actualIso = if (isLgMain0 && lgExtendedIso)
+                        iso.coerceIn(isoRange.lower, 3200)
+                    else iso.coerceIn(isoRange.lower, isoRange.upper)
                     val desiredNs = shutterUs.coerceIn(1L, 1_000_000L) * 1000L
                     val actualNs = desiredNs.coerceIn(expRange.lower, expRange.upper)
                     options.setCaptureRequestOption(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
@@ -582,6 +588,12 @@ class CameraXCapture(
     override fun setLgPhotoProcessing(mode: String) {
         if (!isLgMain0) return
         lgPhotoProcessing = mode.takeIf { it in listOf("off", "fast", "hq") } ?: "off"
+        applyAdvancedCaptureRequest()
+    }
+
+    override fun setLgExtendedIso(enabled: Boolean) {
+        if (!isLgMain0) return
+        lgExtendedIso = enabled
         applyAdvancedCaptureRequest()
     }
 
