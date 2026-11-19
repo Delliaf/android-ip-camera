@@ -14,14 +14,16 @@ import android.util.Log
 internal object LgG6Main0VendorProbe {
     private const val TAG = "LGG6Camera0Probe"
 
-    fun capabilities(context: Context): Set<String> = try {
+    fun capabilities(context: Context): Set<String> {
         if (!LgG6Main0Profile.isDevice()) return emptySet()
-        val manager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
-        val chars = manager.getCameraCharacteristics(LgG6Main0Profile.CAMERA_ID)
-        chars.availableCaptureRequestKeys.map { it.name }.toSet()
-    } catch (e: Exception) {
-        Log.w(TAG, "Cannot obtain camera0 request keys", e)
-        emptySet()
+        return try {
+            val manager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
+            val chars = manager.getCameraCharacteristics(LgG6Main0Profile.CAMERA_ID)
+            chars.availableCaptureRequestKeys.map { it.name }.toSet()
+        } catch (e: Exception) {
+            Log.w(TAG, "Cannot obtain camera0 request keys", e)
+            emptySet()
+        }
     }
 
     fun scan(context: Context) {
