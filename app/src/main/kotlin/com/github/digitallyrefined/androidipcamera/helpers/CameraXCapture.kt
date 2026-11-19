@@ -108,6 +108,8 @@ class CameraXCapture(
     @Volatile private var lgPostRawBoost: Int? = null
     @Volatile private var lgFocusPeaking = false
     @Volatile private var lgPhotoProcessing = "off"
+    @Volatile private var lgNoiseMode = LgG6IspModes.AUTO
+    @Volatile private var lgEdgeMode = LgG6IspModes.AUTO
     @Volatile private var lgExtendedIso = false
     private val isLgMain0: Boolean get() = LgG6Main0Profile.isTarget(logicalCameraId)
     @Volatile private var lastNv21CachedAtMs = 0L
@@ -509,13 +511,25 @@ class CameraXCapture(
                 } else Log.w(TAG, "Manual sensor controls unavailable for Camera2 ID=${logicalCameraId}")
             }
             if (isLgMain0) {
+                // The combined legacy CameraX preset remains the default, but
+                // independent NR and edge options can override either half.
+                val cm = ctx.getSystemService(Context.CAMERA_SERVICE) as CameraManager
+                val chars = cm.getCameraCharacteristics(LgG6Main0Profile.CAMERA_ID)
                 if (lgPhotoProcessing == "fast" || lgPhotoProcessing == "hq") {
-                    val cm = ctx.getSystemService(Context.CAMERA_SERVICE) as CameraManager
-                    val chars = cm.getCameraCharacteristics(LgG6Main0Profile.CAMERA_ID)
                     val profile = if (lgPhotoProcessing == "hq")
                         LgG6PreviewProfile.PHOTO_HQ else LgG6PreviewProfile.PHOTO_FAST
                     LgG6PhotoPreviewTuning.applyCameraX(options, chars, profile)
                 }
+                val nr = LgG6IspModes.noise(lgNoiseMode,
+                    chars.get(CameraCharacteristics.NOISE_REDUCTION_AVAILABLE_NOISE_REDUCTION_MODES))
+                val edge = LgG6IspModes.edge(lgEdgeMode,
+                    chars.get(CameraCharacteristics.EDGE_AVAILABLE_EDGE_MODES))
+                if (lgNoiseMode != LgG6IspModes.AUTO && nr == null)
+                    Log.w(TAG, "Requested NR mode not advertised: $lgNoiseMode")
+                if (lgEdgeMode != LgG6IspModes.AUTO && edge == null)
+                    Log.w(TAG, "Requested EDGE mode not advertised: $lgEdgeMode")
+                nr?.let { options.setCaptureRequestOption(CaptureRequest.NOISE_REDUCTION_MODE, it) }
+                edge?.let { options.setCaptureRequestOption(CaptureRequest.EDGE_MODE, it) }
                 val vendorKeys = LgG6Main0VendorProbe.capabilities(ctx)
                 if (lgFocusPeaking && LgG6Main0Profile.VENDOR_PEAKING in vendorKeys) {
                     try {
@@ -588,6 +602,18 @@ class CameraXCapture(
     override fun setLgPhotoProcessing(mode: String) {
         if (!isLgMain0) return
         lgPhotoProcessing = mode.takeIf { it in listOf("off", "fast", "hq") } ?: "off"
+        applyAdvancedCaptureRequest()
+    }
+
+    override fun setLgNoiseReductionMode(mode: String) {
+        if (!isLgMain0) return
+        lgNoiseMode = mode.takeIf { LgG6IspModes.validNoise(it) } ?: LgG6IspModes.AUTO
+        applyAdvancedCaptureRequest()
+    }
+
+    override fun setLgEdgeMode(mode: String) {
+        if (!isLgMain0) return
+        lgEdgeMode = mode.takeIf { LgG6IspModes.validEdge(it) } ?: LgG6IspModes.AUTO
         applyAdvancedCaptureRequest()
     }
 

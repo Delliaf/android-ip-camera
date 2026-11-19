@@ -1591,6 +1591,8 @@ class StreamingServerHelper(
         val lgPeaking: Boolean,
         val lgTelemetry: Boolean,
         val lgProcessing: String,
+        val lgNoiseReduction: String,
+        val lgEdgeMode: String,
         val lgPreviewProfile: String,
         val lgDirectGamma: String,
         val lgDirectAeFps: String,
@@ -1717,6 +1719,8 @@ class StreamingServerHelper(
                 put("lgPeaking", settings.lgPeaking)
                 put("lgTelemetry", settings.lgTelemetry)
                 put("lgProcessing", settings.lgProcessing)
+                put("lgNoiseReduction", settings.lgNoiseReduction)
+                put("lgEdgeMode", settings.lgEdgeMode)
                 put("lgPreviewProfile", settings.lgPreviewProfile)
                 put("lgDirectGamma", settings.lgDirectGamma)
                 put("lgDirectAeFps", settings.lgDirectAeFps)
@@ -1921,6 +1925,8 @@ class StreamingServerHelper(
             lgPeaking = prefs.getBoolean(LgG6Main0Profile.PREF_PEAKING, false),
             lgTelemetry = prefs.getBoolean(LgG6Main0Profile.PREF_TELEMETRY, false),
             lgProcessing = prefs.getString("lg_main0_processing", "off") ?: "off",
+            lgNoiseReduction = prefs.getString("lg_main0_noise_reduction", "auto") ?: "auto",
+            lgEdgeMode = prefs.getString("lg_main0_edge_mode", "auto") ?: "auto",
             lgPreviewProfile = prefs.getString("lg_main0_preview_profile", "zsl") ?: "zsl",
             lgDirectGamma = prefs.getString("lg_main0_direct_gamma", "0.80") ?: "0.80",
             lgDirectAeFps = prefs.getString("lg_main0_direct_ae_fps", "adaptive") ?: "adaptive",

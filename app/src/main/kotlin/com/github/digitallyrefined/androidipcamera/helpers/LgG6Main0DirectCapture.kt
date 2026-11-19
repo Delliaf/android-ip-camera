@@ -76,6 +76,8 @@ internal class LgG6Main0DirectCapture(
     private var postRawGain = 100
     private var allowExtendedIso = false
     private var profile = LgG6PreviewProfile.PHOTO_ZSL
+    private var noiseMode = LgG6IspModes.AUTO
+    private var edgeMode = LgG6IspModes.AUTO
     private val resultCallback = object : CameraCaptureSession.CaptureCallback() {
         private var n = 0
         private var unsupportedManualIsoFrames = 0
@@ -202,6 +204,12 @@ internal class LgG6Main0DirectCapture(
     override fun setLgPreviewProfile(profile: String) {
         mutate { this.profile = LgG6PreviewProfile.parse(profile) }
     }
+    override fun setLgNoiseReductionMode(mode: String) {
+        mutate { noiseMode = mode.takeIf { LgG6IspModes.validNoise(it) } ?: LgG6IspModes.AUTO }
+    }
+    override fun setLgEdgeMode(mode: String) {
+        mutate { edgeMode = mode.takeIf { LgG6IspModes.validEdge(it) } ?: LgG6IspModes.AUTO }
+    }
     override fun captureStill(onJpeg: (ByteArray?) -> Unit) = onJpeg(null)
 
     private fun submit() {
@@ -216,6 +224,20 @@ internal class LgG6Main0DirectCapture(
             }
             b.addTarget(input)
             LgG6PhotoPreviewTuning.apply(b, characteristics, profile)
+            // Overrides MUST follow the template + combined FAST/HQ profile.
+            // ZSL defaults on the observed H872 were NR=4/EDGE=3.
+            val advertisedNoise = characteristics.get(
+                CameraCharacteristics.NOISE_REDUCTION_AVAILABLE_NOISE_REDUCTION_MODES)
+            val advertisedEdges = characteristics.get(
+                CameraCharacteristics.EDGE_AVAILABLE_EDGE_MODES)
+            val nr = LgG6IspModes.noise(noiseMode, advertisedNoise)
+            val edge = LgG6IspModes.edge(edgeMode, advertisedEdges)
+            if (noiseMode != LgG6IspModes.AUTO && nr == null)
+                Log.w(TAG, "Camera0 does not advertise requested NR mode=$noiseMode; keeping template")
+            if (edgeMode != LgG6IspModes.AUTO && edge == null)
+                Log.w(TAG, "Camera0 does not advertise requested EDGE mode=$edgeMode; keeping template")
+            nr?.let { b.set(CaptureRequest.NOISE_REDUCTION_MODE, it) }
+            edge?.let { b.set(CaptureRequest.EDGE_MODE, it) }
             b.set(CaptureRequest.CONTROL_MODE, CameraMetadata.CONTROL_MODE_AUTO)
             b.set(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE,
                   CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF)
