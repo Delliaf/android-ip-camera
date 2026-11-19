@@ -625,6 +625,7 @@
               <option value="match">Match encoded stream (stable)</option>
               <option value="2560x1440">Request 2560×1440 source</option>
               <option value="3840x2160">Request 3840×2160 (4K) source</option>
+              <option value="4160x2340">Request 4160×2340 · LG Camera0 16:9 YUV</option>
             </select>
             <small>For the highest detail: output 1920×1080, request 4K source, then crop. Camera2 may negotiate a lower source size; Camera1 fallback is limited by its preview size. MJPEG uses the source ImageAnalysis frame when available.</small>
             <small id="captureDiagnostics" aria-live="polite">Captured source: waiting for camera frames</small>
@@ -654,6 +655,7 @@
                 <option value="gpu">GPU ROI from camera source</option>
                 <option value="vendor">LG vendor zoom · experimental</option>
               </select>
+              <small>Camera ID0 advertises CENTER_ONLY crop: ISP zoom cannot pan. To move ROI X/Y, use GPU mode. Vendor zoom is experimental.</small>
               <label for="lgMain0Zoom">Main0 zoom <span class="val-badge" id="lgMain0ZoomVal">4×</span></label>
               <input id="lgMain0Zoom" type="range" min="1" max="8" step="0.1" value="4"
                  data-control="lg_main0_zoom" data-badge="lgMain0ZoomVal" data-fmt="suffix" data-suffix="×">
@@ -1168,6 +1170,11 @@
       if (vendorOpt) vendorOpt.disabled = !cam.lgVendorZoomAvailable;
       const peak = getElById('lgMain0Peaking');
       if (peak) peak.disabled = !cam.lgVendorPeakingAvailable;
+      const gpuPanning = getElById('lgMain0ZoomMode')?.value === 'gpu';
+      for (const id of ['roiX', 'roiY']) {
+        const el = getElById(id);
+        if (el) el.disabled = !gpuPanning;
+      }
       const focusControls = getElById('lgFocusExactControls');
       if (focusControls) focusControls.hidden = getElById('lgMain0FocusMode')?.value !== 'diopters';
       const d = Number(getElById('lgMain0FocusDiopters')?.value);
