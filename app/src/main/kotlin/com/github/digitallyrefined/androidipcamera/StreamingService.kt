@@ -1094,7 +1094,8 @@ class StreamingService : LifecycleService() {
             val target = when (quality) {
                 "high" -> Size(1280, 720)
                 "medium" -> Size(960, 720)
-                "low" -> Size(800, 600)
+                "low" -> if (LgG6Main0Profile.isTarget(camId())) Size(960, 720)
+                         else Size(800, 600)
                 else -> Size(800, 600)
             }
             return fitToEncoderCaps(target.width, target.height, caps.maxW, caps.maxH)
@@ -1350,7 +1351,6 @@ class StreamingService : LifecycleService() {
         }
         try {
             val generation = settingsGeneration
-            val want = desiredSize()
             val prefs = PreferenceManager.getDefaultSharedPreferences(this)
             // If no camera id has been resolved yet (fresh process / the UI never sent a camera
             // control), pin the facing-default to a real Camera2 id. Otherwise `camId()` falls back
@@ -1363,6 +1363,9 @@ class StreamingService : LifecycleService() {
                     prefs.edit().putString(PREF_CAMERA_ID, camId()).apply()
                 }
             }
+            // Resolve camera ID first: the LG-H872 auto 4:3 output default
+            // must be evaluated for the actual Camera0, not a "back" alias.
+            val want = desiredSize()
             val demand = cameraDemand()
             val surfaceEncoder = supportsSurfaceEncoder()
             val fps = streamFps()
