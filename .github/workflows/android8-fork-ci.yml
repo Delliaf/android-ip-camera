@@ -1,0 +1,111 @@
+name: Android 8 Camera Fork - Build and Tests
+
+on:
+  push:
+    branches:
+      - feature/manual-camera-4k-stream
+    paths-ignore:
+      - 'DEVELOPMENT_HISTORY.txt'
+      - 'AGENTS.md'
+      - 'LG_G6_H872_MAIN0.md'
+      - 'FORK_ANDROID8.md'
+  pull_request:
+    branches:
+      - main
+    paths-ignore:
+      - 'DEVELOPMENT_HISTORY.txt'
+      - 'AGENTS.md'
+      - 'LG_G6_H872_MAIN0.md'
+      - 'FORK_ANDROID8.md'
+  workflow_dispatch:
+
+concurrency:
+  group: android8-camera-fork-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  android:
+    # Internal PRs already have a push run. Avoid a second duplicate CI job
+    # that may fail on transient Maven network access and confuse diagnostics.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools'
+
+      - name: Install required Android components
+        run: |
+          sdkmanager "platforms;android-34" "build-tools;34.0.0" "ndk;27.2.12479018"
+
+      - name: Set up Rust for OpenTunnel native library
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - name: Validate embedded browser JavaScript
+        run: |
+          python3 - <<'PY'
+          import pathlib, re
+          source = pathlib.Path("app/src/main/assets/index.html").read_text(encoding="utf-8")
+          match = re.search(r"<script>(.*?)</script>", source, re.DOTALL | re.IGNORECASE)
+          assert match, "Embedded camera dashboard JavaScript is missing"
+          pathlib.Path("/tmp/android-ip-camera-dashboard.js").write_text(match.group(1), encoding="utf-8")
+          PY
+          node --check /tmp/android-ip-camera-dashboard.js
+
+      - name: Test and build debug APK (retry transient dependency failures)
+        run: |
+          chmod +x ./gradlew
+          bash scripts/ci-gradle-retry.sh :app:testDebugUnitTest :app:assembleDebug --no-daemon --max-workers=2
+
+      - name: Verify APK contains only arm64-v8a JNI libraries
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          apks=(app/build/outputs/apk/debug/*.apk)
+          test "${#apks[@]}" -eq 1
+          apk="${apks[0]}"
+          unzip -Z1 "$apk" > "$RUNNER_TEMP/lg-g6-apk-entries.txt"
+          grep -q '^lib/arm64-v8a/' "$RUNNER_TEMP/lg-g6-apk-entries.txt"
+          unexpected="$(grep '^lib/' "$RUNNER_TEMP/lg-g6-apk-entries.txt" | grep -v '^lib/arm64-v8a/' || true)"
+          if [ -n "$unexpected" ]; then
+            echo "Unexpected non-arm64 libraries:"
+            echo "$unexpected"
+            exit 1
+          fi
+          echo "APK JNI ABI verified: arm64-v8a only"
+
+      - name: Upload installable debug APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-ip-camera-android8-debug
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload test reports after failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-ip-camera-test-reports
+          path: |
+            app/build/reports/tests/**
+            app/build/test-results/**
+          if-no-files-found: ignore

@@ -596,15 +596,175 @@
               <button id="modeMjpegBtn" class="btn btn-action" style="width: 49%;">MJPEG</button>
             </div>
 
+            <label for="streamBitrateKbps">Main H.264 / RTSP bitrate</label>
+            <select id="streamBitrateKbps" data-control="stream_bitrate_kbps">
+              <option value="auto">Auto (encoder dependent)</option>
+              <option value="2000">2 Mbps</option>
+              <option value="5000">5 Mbps</option>
+              <option value="10000">10 Mbps</option>
+              <option value="20000">20 Mbps</option>
+              <option value="40000">40 Mbps</option>
+              <option value="60000">60 Mbps</option>
+              <option value="80000">80 Mbps</option>
+            </select>
+            <small>The hardware encoder may clamp the bitrate to supported limits; changing this setting restarts an active encoder.</small>
+
+            <label for="mjpegQuality">Browser MJPEG JPEG quality</label>
+            <select id="mjpegQuality" data-control="mjpeg_quality">
+              <option value="auto">Auto (80%)</option>
+              <option value="85">85%</option>
+              <option value="90">90%</option>
+              <option value="95">95%</option>
+              <option value="100">100%</option>
+            </select>
+            <small>High quality requires more CPU and bandwidth. Memory pressure may temporarily lower quality.</small>
+
+            <p class="group-title">Sensor crop (experimental)</p>
+            <label for="captureResolution">Camera capture resolution</label>
+            <select id="captureResolution" data-control="capture_resolution">
+              <option value="match">Match encoded stream (stable)</option>
+              <option value="2560x1440">Request 2560×1440 source</option>
+              <option value="3840x2160">Request 3840×2160 (4K) source</option>
+              <option value="4160x2340">Request 4160×2340 · LG Camera0 16:9 YUV</option>
+              <option value="4160x3120">Request 4160×3120 · full 4:3 13MP photo source</option>
+              <option value="4000x3000">Request 4000×3000 · 12MP experiment (HAL fallback)</option>
+              <option value="3264x2448">Request 3264×2448 · 8MP comparison</option>
+            </select>
+            <small>High-resolution photo source and encoded output are independent. For LG Main0 prefer 4160×3120 input with 960×720 (4:3) or 768×768 (1:1) H.264 output at 4×. The actual CameraX/Camera2 negotiated size may be smaller than requested.</small>
+            <small id="captureDiagnostics" aria-live="polite">Captured source: waiting for camera frames</small>
+
+            <label for="roiZoom">Source ROI zoom <span class='val-badge' id='roiZoomVal'>1×</span></label>
+            <input id="roiZoom" type="range" min="1" max="8" step="0.1" value="1"
+              data-control="roi_zoom" data-badge="roiZoomVal" data-fmt="suffix" data-suffix="×">
+            <label for="roiX">ROI horizontal center <span class='val-badge' id='roiXVal'>0.5</span></label>
+            <input id="roiX" type="range" min="0" max="1" step="0.01" value="0.5"
+              data-control="roi_x" data-badge="roiXVal">
+            <label for="roiY">ROI vertical center <span class='val-badge' id='roiYVal'>0.5</span></label>
+            <input id="roiY" type="range" min="0" max="1" step="0.01" value="0.5"
+              data-control="roi_y" data-badge="roiYVal">
+            <small>H.264/RTSP crops on the GPU before encoding; MJPEG crops the full-resolution YUV frame before JPEG compression. 2× takes one quarter of the source area.</small>
+
+            <div id="lgG6Main0Panel" hidden style="margin:16px 0; padding:14px; border:1px solid #666; border-radius:8px;">
+              <p class="group-title" style="margin:0 0 8px;">LG G6 H872 · Main Camera ID0</p>
+              <small>LG camera0 only. Normal Camera2 works without root.</small>
+              <label for="lgMain0Backend">Capture engine</label>
+              <select id="lgMain0Backend" data-control="api">
+                <option value="camerax">CameraX · stable default</option>
+                <option value="lg-main0-direct">Direct Camera2 photo-preview · experimental</option>
+              </select>
+              <small>Direct Camera2 can set true ZSL(5) and RECORD(3) templates. Use H.264/RTSP; MJPEG, snapshots, motion analysis and on-phone Preview fall back to CameraX.</small>
+              <label for="lgMain0DirectGamma">Direct Camera2 midtone brightness (gamma) <span id="lgDirectGammaVal" class="val-badge">0.80</span></label>
+              <input type="range" id="lgMain0DirectGamma" min="0.45" max="1.5" step="0.05" value="0.80"
+                  data-control="lg_main0_direct_gamma" data-badge="lgDirectGammaVal">
+              <small>0.45 = brighter dark tones, 0.80 = default correction, 1.00 = original untouched output; values above 1.00 darken. GPU-only tone correction, not sensor ISO or real extra detail. For true A/B comparison set 1.00.</small>
+              <label for="lgMain0DirectAeFps">Direct Camera2 AE shutter freedom</label>
+              <select id="lgMain0DirectAeFps" data-control="lg_main0_direct_ae_fps">
+                <option value="adaptive">Adaptive 2–30 FPS · brighter in low light (recommended)</option>
+                <option value="fixed">Fixed target FPS · smoother, may be very dark</option>
+              </select>
+              <small>LG camera0 exposes fixed [15,15] and wide [2,30] AE ranges. The old Direct backend mistakenly picked the first matching range and locked the shutter to 1/15s. Adaptive now matches CameraX. Camera FPS can drop in very low light, while H.264 output remains capped at its configured FPS.</small>
+              <label for="lgMain0PreviewProfile">Direct Camera2 repeating-request template</label>
+              <select id="lgMain0PreviewProfile" data-control="lg_main0_preview_profile">
+                <option value="zsl">Photo ZSL template 5 · OEM photo-mode A/B</option>
+                <option value="video">Video RECORD template 3 · A/B reference</option>
+                <option value="default">PREVIEW template 1 · ordinary</option>
+                <option value="fast">PREVIEW + FAST ISP post-processing</option>
+                <option value="hq">PREVIEW + HQ NR/EDGE (may lower FPS)</option>
+              </select>
+              <label for="lgMain0Processing">CameraX ISP noise reduction & sharpening</label>
+              <select id="lgMain0Processing" data-control="lg_main0_processing">
+                <option value="off">Default CameraX processing</option>
+                <option value="fast">FAST noise reduction + edges</option>
+                <option value="hq">HIGH QUALITY noise reduction + edges (slower)</option>
+              </select>
+              <label for="lgMain0OutputShape">Encoded output aspect · independent of photo sensor</label>
+              <select id="lgMain0OutputShape" data-control="lg_main0_output_shape">
+                <option value="4:3">4:3 · 960×720 (recommended, full 13MP aspect)</option>
+                <option value="1:1">1:1 · 768×768 (square, no upscaling at 4×)</option>
+                <option value="16:9">16:9 · 960×540 (optional)</option>
+              </select>
+              <small>Source 4160×3120 is 4:3. At 4×, the 4:3 ROI contains ~1040×780 native pixels; the 1:1 ROI ~780×780. Neither requires 16:9.</small>
+              <div style="display:flex; gap:6px; flex-wrap:wrap; margin:12px 0;">
+                <button id="lgPresetIsp" class="btn" type="button">ISP 4× · chosen aspect</button>
+                <button id="lgPresetGpu" class="btn" type="button">13MP GPU ROI 4×</button>
+                <button id="lgPresetSafe" class="btn" type="button">1× · chosen aspect</button>
+              </div>
+              <label for="lgMain0ZoomMode">Zoom mode — never combine ISP and GPU zoom</label>
+              <select id="lgMain0ZoomMode" data-control="lg_main0_zoom_mode">
+                <option value="isp">CameraX ISP sensor crop · recommended</option>
+                <option value="gpu">GPU ROI from camera source</option>
+                <option value="vendor">LG vendor zoom · experimental</option>
+              </select>
+              <small>Camera ID0 advertises CENTER_ONLY crop: ISP zoom cannot pan. To move ROI X/Y, use GPU mode. Vendor zoom is experimental.</small>
+              <label for="lgMain0Zoom">Main0 zoom <span class="val-badge" id="lgMain0ZoomVal">4×</span></label>
+              <input id="lgMain0Zoom" type="range" min="1" max="8" step="0.1" value="4"
+                 data-control="lg_main0_zoom" data-badge="lgMain0ZoomVal" data-fmt="suffix" data-suffix="×">
+              <label for="lgMain0FocusMode">Precise focus</label>
+              <select id="lgMain0FocusMode" data-control="lg_main0_focus_mode">
+                <option value="auto">Auto focus</option>
+                <option value="diopters">Manual lens focus (diopters)</option>
+              </select>
+              <div id="lgFocusExactControls" hidden>
+                <label for="lgMain0FocusDiopters">Focus distance (D) <span id="lgFocusMeters" class="val-badge">∞</span></label>
+                <input id="lgMain0FocusDiopters" type="number" min="0" max="10" step="0.05" value="0.25"
+                    data-control="lg_main0_focus_diopters">
+                <small>0D = infinity; 10D = near. Meters ~ 1/D are approximate.</small>
+              </div>
+              <label for="lgMain0ExtendedIso">Experimental ISO above 800</label>
+              <select id="lgMain0ExtendedIso" data-control="lg_main0_extended_iso">
+                <option value="false">OFF — clamp manual ISO to reported 50–800</option>
+                <option value="true">Try 801–3200 (may be rejected by Camera HAL)</option>
+              </select>
+              <small>Auto CaptureResult showed ISO >1400, but this does NOT guarantee HAL accepts manual ISO >800. Compare requested and actual ISO; restore OFF if frames stop.</small>
+              <label for="lgMain0Boost">Post-RAW gain (digital gain, NOT ISO)</label>
+              <select id="lgMain0Boost" data-control="lg_main0_postraw_boost">
+                <option value="100">100% (off)</option>
+                <option value="200">200% digital gain</option>
+                <option value="400">400% digital gain</option>
+              </select>
+              <label for="lgMain0Peaking">OEM focus peaking (experimental)</label>
+              <select id="lgMain0Peaking" data-control="lg_main0_peaking">
+                <option value="false">Off</option>
+                <option value="true">On (if vendor tag advertised)</option>
+              </select>
+              <label for="lgMain0Telemetry">Camera2 CaptureResult readback</label>
+              <select id="lgMain0Telemetry" data-control="lg_main0_telemetry">
+                <option value="false">Off (default)</option>
+                <option value="true">On — log ISO, shutter, focus, crop</option>
+              </select>
+              <small id="lgVendorInfo" aria-live="polite"></small>
+              <pre id="lgCaptureReadback" style="font-size:11px; white-space:pre-wrap; overflow-wrap:anywhere;">Readback disabled</pre>
+              <small>Vendor extensions may be unavailable to third-party apps. No root/HAL replacement is used.</small>
+            </div>
+
             <p class="group-title">Camera Control</p>
 
             <label for="resolutionSelect">Resolution <span class='val-badge' id='resolutionVal'>&mdash;</span></label>
             <select id="resolutionSelect" style="margin-bottom: 20px" onchange='setResolution(this.value)'></select>
 
-            <label for="exposure">Exposure <span class='val-badge' id='exposureVal'>0</span></label>
+            <label for="exposure">Auto exposure compensation <span class='val-badge' id='exposureVal'>0</span></label>
             <input id="exposure" type='range' min='-10' max='10' step='1' value='0' data-control='exposure'
               data-badge='exposureVal'>
 
+            <div class="manual-camera-panel" style="margin:14px 0 20px; padding:12px; border:1px solid var(--border, #666); border-radius:8px;">
+              <label for="exposureMode">Sensor exposure</label>
+              <select id="exposureMode" data-control="exposure_mode">
+                <option value="auto">Auto (AE)</option>
+                <option value="manual">Manual ISO + shutter</option>
+              </select>
+              <div id="manualExposureControls" hidden>
+                <label for="manualIsoSlider">ISO <span id="manualIsoBadge" class="val-badge">400</span></label>
+                <input type="range" id="manualIsoSlider" min="50" max="800" step="1" value="400">
+                <label for="manualIso">ISO exact value</label>
+                <input type="number" id="manualIso" min="50" max="800" step="1" value="400" data-control="manual_iso">
+                <label for="manualShutterSlider">Shutter <span id="manualShutterBadge" class="val-badge">1/50 s</span></label>
+                <input type="range" id="manualShutterSlider" min="0" max="1000" step="1" value="520">
+                <label for="manualShutterUs">Shutter exact time (µs)</label>
+                <input type="number" id="manualShutterUs" min="100" max="1000000" step="1" value="20000" data-control="manual_shutter_us">
+                <small>Logarithmic shutter slider for fine adjustment. 10000 µs = 1/100 s; long exposures reduce FPS. Actual results are in CaptureResult telemetry.</small>
+              </div>
+              <small id="manualExposureStatus" aria-live="polite"></small>
+            </div>
             <label for="focusDistance">Focus <span class='val-badge' id='focusVal'>Auto</span></label>
             <input id="focusDistance" type='range' min='-0.05' max='1.0' step='0.05' value='-1'
               data-control='focus_distance' data-badge='focusVal' data-fmt='focus'>
@@ -1014,6 +1174,7 @@
     // Map control parameter names to the `lensSettings` keys used in `info.json`.
     function toLensKey(param) {
       if (!param) return null;
+      if (param.startsWith('lg_main0_') || param === 'api') return null;
       if (param === 'focus' || param === 'focus_distance') return 'focusDistance';
       if (param === 'snapshot_res') return 'snapshotRes';
       // Motion detection and RTSP/substream settings are global, not lens settings.
@@ -1027,11 +1188,114 @@
     function normalizeValueForKey(key, val) {
       if (val === null || val === undefined) return val;
       // Numeric settings should be stored as numbers when possible
-      if (['zoom', 'exposure', 'rotate', 'scale', 'contrast', 'focusDistance'].includes(key)) {
+      if (['zoom', 'exposure', 'rotate', 'scale', 'contrast', 'focusDistance', 'roiZoom', 'roiX', 'roiY'].includes(key)) {
         const n = parseFloat(val);
         return Number.isFinite(n) ? n : val;
       }
       return val;
+    }
+
+    function updateLgMain0Ui(data, loadValues) {
+      const cam = selectedCameraInfo();
+      const panel = getElById('lgG6Main0Panel');
+      if (!panel) return;
+      const available = cam?.lgMain0 === true;
+      panel.hidden = !available;
+      if (!available) {
+        for (const id of ['roiX', 'roiY']) {
+          const el = getElById(id);
+          if (el) el.disabled = false;
+        }
+        return;
+      }
+      const settings = data?.settings || {};
+      const controls = {
+        lgMain0Backend: settings.api === 'lg-main0-direct' ? 'lg-main0-direct' : 'camerax',
+        lgMain0OutputShape: settings.lgOutputShape,
+        lgMain0PreviewProfile: settings.lgPreviewProfile,
+        lgMain0DirectGamma: settings.lgDirectGamma,
+        lgMain0DirectAeFps: settings.lgDirectAeFps,
+        lgMain0Processing: settings.lgProcessing,
+        lgMain0ExtendedIso: settings.lgExtendedIso === true ? 'true' : 'false',
+        lgMain0ZoomMode: settings.lgZoomMode,
+        lgMain0Zoom: settings.lgZoom,
+        lgMain0FocusMode: settings.lgFocusMode,
+        lgMain0FocusDiopters: settings.lgFocusDiopters,
+        lgMain0Boost: settings.lgPostRawBoost,
+        lgMain0Peaking: settings.lgPeaking === true ? 'true' : 'false',
+        lgMain0Telemetry: settings.lgTelemetry === true ? 'true' : 'false'
+      };
+      if (loadValues) for (const [id, val] of Object.entries(controls)) {
+        const el = getElById(id);
+        if (el && val !== undefined && val !== null) el.value = String(val);
+      }
+      const direct = getElById('lgMain0Backend')?.value === 'lg-main0-direct';
+      const profile = getElById('lgMain0PreviewProfile');
+      if (profile) profile.disabled = !direct;
+      const gamma = getElById('lgMain0DirectGamma');
+      if (gamma) gamma.disabled = !direct;
+      const aeFps = getElById('lgMain0DirectAeFps');
+      if (aeFps) aeFps.disabled = !direct;
+      const processing = getElById('lgMain0Processing');
+      if (processing) processing.disabled = direct;
+      updateManualExposureUi();
+      const vendorOpt = getElById('lgMain0ZoomMode')?.querySelector('option[value="vendor"]');
+      if (vendorOpt) vendorOpt.disabled = !cam.lgVendorZoomAvailable;
+      const peak = getElById('lgMain0Peaking');
+      if (peak) peak.disabled = !cam.lgVendorPeakingAvailable;
+      const gpuPanning = getElById('lgMain0ZoomMode')?.value === 'gpu';
+      for (const id of ['roiX', 'roiY']) {
+        const el = getElById(id);
+        if (el) el.disabled = !gpuPanning;
+      }
+      const focusControls = getElById('lgFocusExactControls');
+      if (focusControls) focusControls.hidden = getElById('lgMain0FocusMode')?.value !== 'diopters';
+      const d = Number(getElById('lgMain0FocusDiopters')?.value);
+      const m = getElById('lgFocusMeters');
+      if (m) m.textContent = Number.isFinite(d) && d > 0 ? '~' + (1 / d).toFixed(2) + ' m' : '∞';
+      const badge = getElById('lgMain0ZoomVal');
+      if (badge) badge.textContent = (Number(getElById('lgMain0Zoom')?.value) || 4).toFixed(1) + '×';
+      const gammaBadge = getElById('lgDirectGammaVal');
+      if (gammaBadge) gammaBadge.textContent =
+        (Number(getElById('lgMain0DirectGamma')?.value) || 0.8).toFixed(2);
+      const vendor = getElById('lgVendorInfo');
+      if (vendor) vendor.textContent = 'OEM zoom ' + (cam.lgVendorZoomAvailable ? 'advertised' : 'unavailable') +
+        ' · OEM peaking ' + (cam.lgVendorPeakingAvailable ? 'advertised' : 'unavailable') +
+        ' · Camera2 ID0 analog ISO 50–800 (not 3200)';
+      const readback = getElById('lgCaptureReadback');
+      if (readback && settings.lgCaptureResult) readback.textContent = settings.lgCaptureResult;
+    }
+
+    // Hide unsupported Camera2 manual-sensor options rather than sending settings
+    // that a legacy Camera1 backend cannot use. The camera API selector still matters.
+    function updateManualExposureUi() {
+      const cam = selectedCameraInfo();
+      const caps = cam?.manualExposure;
+      const supported = caps?.supported === true;
+      const mode = getElById('exposureMode');
+      const panel = getElById('manualExposureControls');
+      const notice = getElById('manualExposureStatus');
+      const iso = getElById('manualIso');
+      const shutter = getElById('manualShutterUs');
+      const lgExtended = selectedCameraInfo()?.lgMain0 === true &&
+        getElById('lgMain0ExtendedIso')?.value === 'true';
+      if (!mode || !panel) return;
+      mode.disabled = !supported;
+      panel.hidden = !supported || mode.value !== 'manual';
+      if (supported) {
+        if (iso) {
+          iso.min = String(caps.isoMin || 25);
+          iso.max = String(lgExtended ? 3200 : (caps.isoMax || 800));
+        }
+        if (shutter) {
+          shutter.min = String(caps.shutterMinUs || 1);
+          shutter.max = String(caps.shutterMaxUs || 1000000);
+        }
+      }
+      updateManualExposureSliders();
+      if (notice) notice.textContent = supported
+        ? 'Manual sensor controls supported. Auto AE can use ISO above the advertised manual range; when AE is ON, template requestISO values are ignored. For the brightest direct preview, start with Auto AE.'
+        : 'Manual ISO/shutter unavailable on this camera (Camera2 MANUAL_SENSOR not advertised).';
     }
 
     // Keep the client-side `cameraList` in sync with recently-sent control values.
@@ -1044,6 +1308,7 @@
       cam.lensSettings[key] = normalizeValueForKey(key, val);
       // Reflect the change in the visible controls without re-sending to server
       try { applyStreamSettings(cam.lensSettings); } catch (_) { }
+      if (param === 'exposure_mode') updateManualExposureUi();
     }
 
     function formatControlValue(el) {
@@ -1152,7 +1417,61 @@
       if (badge) badge.innerText = formatControlValue(el);
     }
 
+    // Keep manual numeric fields as canonical controls; sliders feed them through
+    // the existing throttled control sender and therefore share the same persistence.
+    function updateManualExposureSliders() {
+      const iso = getElById('manualIso'), isoSlider = getElById('manualIsoSlider');
+      const shutter = getElById('manualShutterUs'), shutterSlider = getElById('manualShutterSlider');
+      const isoBadge = getElById('manualIsoBadge'), shutterBadge = getElById('manualShutterBadge');
+      if (iso && isoSlider) {
+        isoSlider.min = String(iso.min || 50);
+        isoSlider.max = String(iso.max || 800);
+        if (document.activeElement !== isoSlider)
+          isoSlider.value = String(Math.max(+isoSlider.min, Math.min(+isoSlider.max, +iso.value || 50)));
+        if (isoBadge) isoBadge.textContent = iso.value || '–';
+      }
+      if (shutter && shutterSlider) {
+        const low = Math.max(1, +shutter.min || 100), high = Math.max(low+1, +shutter.max || 1_000_000);
+        const exposure = Math.max(low, Math.min(high, +shutter.value || 20000));
+        if (document.activeElement !== shutterSlider)
+          shutterSlider.value = String(Math.round(1000*Math.log(exposure/low)/Math.log(high/low)));
+        if (shutterBadge) shutterBadge.textContent = (exposure < 1_000_000
+          ? '1/' + Math.round(1_000_000/exposure) + ' s' : (exposure/1_000_000).toFixed(2)+' s')
+          + ' (' + Math.round(exposure/1000) + ' ms)';
+      }
+    }
+    for (const [sliderId, numericId] of [['manualIsoSlider','manualIso'],['manualShutterSlider','manualShutterUs']]) {
+      const slider = getElById(sliderId), field = getElById(numericId);
+      if (!slider || !field) continue;
+      for (const eventType of ['input','change'])
+        slider.addEventListener(eventType, () => {
+          if (sliderId === 'manualIsoSlider') field.value = slider.value;
+          else {
+            const low = Math.max(1, +field.min || 100), high = Math.max(low+1, +field.max || 1_000_000);
+            const x = (+slider.value / 1000);
+            field.value = String(Math.round(low * Math.pow(high / low, x)));
+          }
+          field.dispatchEvent(new Event(eventType, {bubbles: true}));
+          updateManualExposureSliders();
+        });
+      field.addEventListener('input', updateManualExposureSliders);
+      field.addEventListener('change', updateManualExposureSliders);
+    }
+
     document.querySelectorAll('[data-control]').forEach(bindControl);
+    for (const [id, preset] of [['lgPresetIsp', 'isp4'], ['lgPresetGpu', 'gpu4'], ['lgPresetSafe', 'safe']]) {
+      getElById(id)?.addEventListener('click', () => {
+        sendControl('lg_main0_preset', preset);
+        setTimeout(() => loadDeviceInfo(true), 1200);
+      });
+    }
+    for (const id of ['lgMain0Backend', 'lgMain0DirectGamma', 'lgMain0DirectAeFps',
+                      'lgMain0OutputShape',
+                      'lgMain0Processing', 'lgMain0ExtendedIso',
+                      'lgMain0ZoomMode',
+                      'lgMain0FocusMode', 'lgMain0FocusDiopters', 'lgMain0Zoom'])
+      getElById(id)?.addEventListener('input', () => updateLgMain0Ui({settings: {}}, false));
+
 
     function getUserScale() {
       const el = getElById('scale');
@@ -2008,6 +2327,19 @@
             } catch (_) { }
           }
           updateStatusOverlay(data);
+          updateManualExposureUi();
+          updateLgMain0Ui(data, applySettings);
+          const cap = data.captureFrame || {};
+          const diag = getElById('captureDiagnostics');
+          if (diag) {
+            const analysis = cap.analysisWidth > 0
+              ? cap.analysisWidth + '×' + cap.analysisHeight : 'not active';
+            const gpu = cap.gpuInputWidth > 0
+              ? cap.gpuInputWidth + '×' + cap.gpuInputHeight : 'not active';
+            diag.textContent = 'Actual CameraX analysis: ' + analysis +
+              ' · H.264 GPU input: ' + gpu +
+              ' (these are negotiated sizes, not guaranteed sensor pixel detail)';
+          }
           getElById('appVersion').innerText = `v${data.appVersion}`;
         })
         .catch(err => {

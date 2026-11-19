@@ -60,7 +60,9 @@ class StreamingServerHelper(
     private val onRecordStart: () -> Triple<Boolean, String, String> = { Triple(false, "503 Service Unavailable", """{"error":"unavailable"}""") },
     private val onRecordStop: () -> Triple<Boolean, String, String> = { Triple(false, "409 Conflict", """{"error":"not_recording"}""") },
     private val onRecordStatus: () -> String = { """{"recording":false}""" },
-    private val onStreamingEnabledChanged: (Boolean) -> Unit = {}
+    private val onStreamingEnabledChanged: (Boolean) -> Unit = {},
+    private val sourceFrameSize: () -> Pair<Int, Int>? = { null },
+    private val gpuFrameSize: () -> Pair<Int, Int>? = { null }
 ) {
     data class Client(
         val socket: Socket,
@@ -1327,6 +1329,12 @@ class StreamingServerHelper(
             val keys = listOf(
                 "zoom_$cameraId", "zoom_$physical",
                 "exposure_$cameraId", "exposure_$physical",
+                "manual_exposure_mode_$cameraId", "manual_exposure_mode_$physical",
+                "manual_iso_$cameraId", "manual_iso_$physical",
+                "manual_shutter_us_$cameraId", "manual_shutter_us_$physical",
+                "roi_zoom_$cameraId", "roi_zoom_$physical",
+                "roi_x_$cameraId", "roi_x_$physical",
+                "roi_y_$cameraId", "roi_y_$physical",
                 "focus_$cameraId", "focus_$physical",
                 "camera_rotate_$cameraId", "camera_rotate_$physical",
                 "stream_scale_$cameraId", "stream_scale_$physical",
@@ -1350,6 +1358,12 @@ class StreamingServerHelper(
                     "resolution" to "auto",
                     "zoom" to String.format(Locale.US, "%.1f", minZoom),
                     "exposure" to "0",
+                    "exposure_mode" to "auto",
+                    "manual_iso" to "400",
+                    "manual_shutter_us" to "20000",
+                    "roi_zoom" to "1",
+                    "roi_x" to "0.5",
+                    "roi_y" to "0.5",
                     "focus_distance" to "-1",
                     "scale" to "1.0",
                     "contrast" to "0",
@@ -1461,7 +1475,12 @@ class StreamingServerHelper(
 
     private data class InfoSize(val w: Int, val h: Int)
 
-    private data class InfoCamera(val id: String, val facing: String, val label: String, val sizes: List<InfoSize>, val hasFlash: Boolean, val sensorOrientation: Int, val minZoom: Float?, val maxZoom: Float?)
+    private data class InfoCamera(
+        val id: String, val facing: String, val label: String, val sizes: List<InfoSize>,
+        val hasFlash: Boolean, val sensorOrientation: Int, val minZoom: Float?, val maxZoom: Float?,
+        val manualSensor: Boolean = false, val isoMin: Int = 25, val isoMax: Int = 3200,
+        val shutterMinUs: Long = 100, val shutterMaxUs: Long = 1_000_000
+    )
 
     private data class CameraInfoSource(
         val id: String,
@@ -1477,6 +1496,7 @@ class StreamingServerHelper(
         val cameraId: String?,
         val resolution: String,
         val streamRes: String,
+        val api: String,
         val fps: String,
         val torch: String,
         val deviceHasFlash: Boolean,
@@ -1494,6 +1514,22 @@ class StreamingServerHelper(
         val rtspSubSize: String,
         val rtspSubFps: String,
         val rtspSubBitrate: String,
+        val streamBitrateKbps: String,
+        val mjpegQuality: String,
+        val captureResolution: String,
+        val lgZoomMode: String,
+        val lgOutputShape: String,
+        val lgZoom: String,
+        val lgFocusMode: String,
+        val lgFocusDiopters: String,
+        val lgPostRawBoost: String,
+        val lgPeaking: Boolean,
+        val lgTelemetry: Boolean,
+        val lgProcessing: String,
+        val lgPreviewProfile: String,
+        val lgDirectGamma: String,
+        val lgDirectAeFps: String,
+        val lgExtendedIso: Boolean,
     )
 
     private data class DeviceInfo(
@@ -1503,6 +1539,8 @@ class StreamingServerHelper(
         val wifiStrength: Int,
         val settings: StreamSettings,
         val perCameraSettings: Map<String, Map<String, String>> = emptyMap(),
+        val sourceSize: Pair<Int, Int>? = null,
+        val gpuSize: Pair<Int, Int>? = null,
     ) {
         fun toJsonString(): String = JSONObject().apply {
             put("cameras", JSONArray().apply {
@@ -1513,6 +1551,19 @@ class StreamingServerHelper(
                         put("label", camera.label)
                         put("hasFlash", camera.hasFlash)
                         put("sensorOrientation", camera.sensorOrientation)
+                        put("lgMain0", LgG6Main0Profile.isTarget(camera.id))
+                        if (LgG6Main0Profile.isTarget(camera.id)) {
+                            val vendor = LgG6Main0VendorProbe.capabilities(context)
+                            put("lgVendorZoomAvailable", LgG6Main0Profile.VENDOR_ZOOM in vendor)
+                            put("lgVendorPeakingAvailable", LgG6Main0Profile.VENDOR_PEAKING in vendor)
+                        }
+                        put("manualExposure", JSONObject().apply {
+                            put("supported", camera.manualSensor)
+                            put("isoMin", camera.isoMin)
+                            put("isoMax", camera.isoMax)
+                            put("shutterMinUs", camera.shutterMinUs)
+                            put("shutterMaxUs", camera.shutterMaxUs)
+                        })
                         try {
                             put("zoom", JSONObject().apply {
                                 try {
@@ -1545,12 +1596,20 @@ class StreamingServerHelper(
             })
             put("batteryPercent", batteryPercent)
             put("wifiStrength", wifiStrength)
+            // Real negotiated sizes, rather than a desired 4K label.
+            put("captureFrame", JSONObject().apply {
+                put("analysisWidth", sourceSize?.first ?: 0)
+                put("analysisHeight", sourceSize?.second ?: 0)
+                put("gpuInputWidth", gpuSize?.first ?: 0)
+                put("gpuInputHeight", gpuSize?.second ?: 0)
+            })
             put("settings", JSONObject().apply {
                 // Keep global stream-level settings here; per-camera lens settings are exposed
                 // under `cameras[].lensSettings` and should be used by the UI.
                 put("cameraId", settings.cameraId)
                 put("resolution", settings.resolution)
                 put("streamRes", settings.streamRes)
+                put("api", settings.api)
                 put("fps", settings.fps)
                 put("torch", settings.torch)
                 // Whether ANY rear lens can drive the flash — the torch is a device-level unit,
@@ -1571,6 +1630,25 @@ class StreamingServerHelper(
                 put("rtspSubSize", settings.rtspSubSize)
                 put("rtspSubFps", settings.rtspSubFps)
                 put("rtspSubBitrate", settings.rtspSubBitrate)
+                put("streamBitrateKbps", settings.streamBitrateKbps)
+                put("mjpegQuality", settings.mjpegQuality)
+                put("captureResolution", settings.captureResolution)
+                put("lgZoomMode", settings.lgZoomMode)
+                put("lgOutputShape", settings.lgOutputShape)
+                put("lgZoom", settings.lgZoom)
+                put("lgFocusMode", settings.lgFocusMode)
+                put("lgFocusDiopters", settings.lgFocusDiopters)
+                put("lgPostRawBoost", settings.lgPostRawBoost)
+                put("lgPeaking", settings.lgPeaking)
+                put("lgTelemetry", settings.lgTelemetry)
+                put("lgProcessing", settings.lgProcessing)
+                put("lgPreviewProfile", settings.lgPreviewProfile)
+                put("lgDirectGamma", settings.lgDirectGamma)
+                put("lgDirectAeFps", settings.lgDirectAeFps)
+                put("lgExtendedIso", settings.lgExtendedIso)
+                put("lgCaptureResult", if (settings.lgTelemetry &&
+                    android.os.SystemClock.elapsedRealtime() - LgG6Main0Telemetry.lastUpdatedMs < 5000L)
+                    LgG6Main0Telemetry.lastSummary else "telemetry disabled or waiting for new frames")
             })
             put("appVersion", context.packageManager.getPackageInfo(context.packageName, 0).versionName.orEmpty())
         }.toString()
@@ -1660,6 +1738,12 @@ class StreamingServerHelper(
 
             // Exposure
             map["exposure"] = storedPrefString("0", "exposure_") ?: "0"
+            map["exposureMode"] = storedPrefString("auto", "manual_exposure_mode_") ?: "auto"
+            map["manualIso"] = storedPrefString("400", "manual_iso_") ?: "400"
+            map["manualShutterUs"] = storedPrefString("20000", "manual_shutter_us_") ?: "20000"
+            map["roiZoom"] = storedPrefString("1", "roi_zoom_") ?: "1"
+            map["roiX"] = storedPrefString("0.5", "roi_x_") ?: "0.5"
+            map["roiY"] = storedPrefString("0.5", "roi_y_") ?: "0.5"
 
             // Focus distance
             map["focusDistance"] = storedPrefString("-1", "focus_") ?: "-1"
@@ -1689,6 +1773,8 @@ class StreamingServerHelper(
             wifiStrength = getWifiStrength(),
             settings = getStreamSettings(cameraList),
             perCameraSettings = perCamera,
+            sourceSize = sourceFrameSize(),
+            gpuSize = gpuFrameSize(),
         )
     }
 
@@ -1712,6 +1798,7 @@ class StreamingServerHelper(
             cameraId = cameraId,
             resolution = prefs.getString("camera_resolution", "low") ?: "low",
             streamRes = prefs.getString("stream_res", "auto") ?: "auto",
+            api = prefs.getString("capture_api", "auto") ?: "auto",
             fps = prefs.getString("stream_fps", "30") ?: "30",
             torch = prefs.getString("camera_torch", "off") ?: "off",
             deviceHasFlash = anyBackCameraWithFlash(),
@@ -1741,6 +1828,22 @@ class StreamingServerHelper(
                 ?: RtspServer.DEFAULT_SUB_FPS.toString(),
             rtspSubBitrate = prefs.getString(RtspServer.PREF_SUB_BITRATE, null)
                 ?: RtspServer.DEFAULT_SUB_BITRATE_KBPS.toString(),
+            streamBitrateKbps = prefs.getString("stream_bitrate_kbps", "auto") ?: "auto",
+            mjpegQuality = prefs.getString("mjpeg_quality", "auto") ?: "auto",
+            captureResolution = prefs.getString("capture_resolution", "match") ?: "match",
+            lgZoomMode = prefs.getString(LgG6Main0Profile.PREF_ZOOM_MODE, "isp") ?: "isp",
+            lgOutputShape = prefs.getString("lg_main0_output_shape", "4:3") ?: "4:3",
+            lgZoom = prefs.getString(LgG6Main0Profile.PREF_ZOOM, "4.0") ?: "4.0",
+            lgFocusMode = prefs.getString(LgG6Main0Profile.PREF_FOCUS_MODE, "auto") ?: "auto",
+            lgFocusDiopters = prefs.getString(LgG6Main0Profile.PREF_FOCUS_DIOPTERS, "0.25") ?: "0.25",
+            lgPostRawBoost = prefs.getString(LgG6Main0Profile.PREF_POST_RAW_BOOST, "100") ?: "100",
+            lgPeaking = prefs.getBoolean(LgG6Main0Profile.PREF_PEAKING, false),
+            lgTelemetry = prefs.getBoolean(LgG6Main0Profile.PREF_TELEMETRY, false),
+            lgProcessing = prefs.getString("lg_main0_processing", "off") ?: "off",
+            lgPreviewProfile = prefs.getString("lg_main0_preview_profile", "zsl") ?: "zsl",
+            lgDirectGamma = prefs.getString("lg_main0_direct_gamma", "0.80") ?: "0.80",
+            lgDirectAeFps = prefs.getString("lg_main0_direct_ae_fps", "adaptive") ?: "adaptive",
+            lgExtendedIso = prefs.getBoolean(LgG6Main0Profile.PREF_EXTENDED_ISO, false),
         )
     }
 
@@ -1922,7 +2025,19 @@ class StreamingServerHelper(
 
                     Pair(roundedMin, roundedMax)
                 } catch (_: Exception) { Pair(null, null) }
-                InfoCamera(source.id, source.facing, label, sizes, hasFlash, sensorOrientation, minZoom, maxZoom)
+                val availableCaps = ch.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES)
+                    ?: source.characteristics.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES)
+                val manualSensor = availableCaps?.contains(
+                    CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_MANUAL_SENSOR) == true
+                val isoRange = ch.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)
+                    ?: source.characteristics.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)
+                val shutterRange = ch.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)
+                    ?: source.characteristics.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)
+                InfoCamera(source.id, source.facing, label, sizes, hasFlash, sensorOrientation,
+                    minZoom, maxZoom, manualSensor,
+                    isoRange?.lower ?: 25, isoRange?.upper ?: 3200,
+                    shutterRange?.lower?.div(1000L)?.coerceAtLeast(1L) ?: 100L,
+                    shutterRange?.upper?.div(1000L)?.coerceAtMost(1_000_000L) ?: 1_000_000L)
             }
         } catch (_: Throwable) {
             emptyList()

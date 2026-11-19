@@ -21,8 +21,10 @@ android {
         applicationId "com.github.digitallyrefined.androidipcamera"
         minSdk 24
         targetSdk 34
-        versionCode 180
-        versionName "0.18.0"
+        // The release split is arm64-only; Rust builds only aarch64 native code.
+        // Do NOT also set ndk.abiFilters: AGP rejects overlapping ABI splits.
+        versionCode 184
+        versionName "0.18.0-delliaf.4"
 
         // https://f-droid.org/docs/Reproducible_Builds/#pngs-generated-from-vector-drawables
         vectorDrawables.generatedDensities = []
@@ -73,8 +75,8 @@ android {
                 abi {
                     enable enableAbiSplits
                     reset()
-                    include "armeabi-v7a", "arm64-v8a"
-                    universalApk true
+                    include "arm64-v8a"
+                    universalApk false
                 }
             }
         }
@@ -114,7 +116,7 @@ android {
     applicationVariants.all { variant ->
         variant.outputs.all { output ->
             def versionName = variant.versionName
-            def abi = output.getFilter(com.android.build.OutputFile.ABI) ?: "universal"
+            def abi = output.getFilter(com.android.build.OutputFile.ABI) ?: "arm64-v8a"
             def buildType = variant.buildType.name
 
             def newApkName = "${project.rootProject.name}-${versionName}-${abi}-${buildType}.apk"
@@ -131,7 +133,7 @@ tasks.whenTaskAdded { task ->
 }
 
 // ---------------------------------------------------------------------------
-// Rust OpenTunnel client (JNI, arm64-v8a + armeabi-v7a)
+// Rust OpenTunnel client (JNI, arm64-v8a only)
 // ---------------------------------------------------------------------------
 // Locate the Rust toolchain explicitly instead of trusting PATH. A Gradle daemon
 // keeps the environment of whichever process started it, so a daemon that
@@ -165,12 +167,6 @@ def rustAbis = [
         abi: "arm64-v8a",
         rustTarget: "aarch64-linux-android",
         clang: "aarch64-linux-android${rustApiLevel}-clang",
-    ],
-    [
-        taskSuffix: "Armv7",
-        abi: "armeabi-v7a",
-        rustTarget: "armv7-linux-androideabi",
-        clang: "armv7a-linux-androideabi${rustApiLevel}-clang",
     ],
 ]
 
@@ -260,11 +256,7 @@ tasks.register("buildOpenTunnelNative") {
     dependsOn rustTaskNames
 }
 
-// Cargo serializes access to its shared target directory; keep the builds ordered.
-tasks.named("buildOpenTunnelNativeArmv7").configure {
-    mustRunAfter "buildOpenTunnelNativeArm64"
-}
-
+// Only the arm64 Rust target is configured for this LG G6 build.
 tasks.matching { it.name == "preBuild" }.configureEach {
     dependsOn "buildOpenTunnelNative"
 }

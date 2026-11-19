@@ -78,7 +78,8 @@ class H264StreamingEncoder(
                     outW,
                     outH,
                     fpsCoerced,
-                    H264HardwareEncoder.bitrateFor(outW, outH),
+                    H264HardwareEncoder.bitrateFor(outW, outH,
+                        prefs.getString("stream_bitrate_kbps", "auto")?.toIntOrNull()),
                     false
                 ) { d, k, pts -> broadcastH264(d, k, pts) }
                 h264HardwareEncoder = encMutable

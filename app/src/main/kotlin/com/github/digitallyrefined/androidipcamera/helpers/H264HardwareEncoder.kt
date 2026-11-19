@@ -715,7 +715,9 @@ class H264HardwareEncoder(
          * Target ~0.2 bits/pixel/frame at 30fps (w*h*6) — enough to avoid visible H.264 macroblocking
          * (the old w*h*3 ≈ 0.1 bpp looked "compressed" at 1440x1080). Clamped to the device's range.
          */
-        fun bitrateFor(w: Int, h: Int): Int = clampBitrate(w.toLong() * h * 6)
+        fun bitrateFor(w: Int, h: Int, requestedKbps: Int? = null): Int =
+            clampBitrate(requestedKbps?.takeIf { it in 250..100_000 }?.toLong()?.times(1000L)
+                ?: w.toLong() * h * 6)
 
         /** [bitsPerSecond] within the device encoder's supported range. */
         fun clampBitrate(bitsPerSecond: Long): Int {

@@ -688,7 +688,21 @@ class StreamingService : LifecycleService() {
                 onRecordStop = { stopRecording() },
                 onRecordStatus = { getRecordingStatus() },
                 // /control/stop must also drop RTSP viewers, which the HTTP server does not own.
-                onStreamingEnabledChanged = { enabled -> if (!enabled) rtspServer?.disconnectAll() }
+                onStreamingEnabledChanged = { enabled -> if (!enabled) rtspServer?.disconnectAll() },
+                sourceFrameSize = {
+                    val active = backend
+                    val hasRealFrame = when (active) {
+                        is CameraXCapture -> active.hasProducedFrame
+                        null -> false
+                        else -> active.ready
+                    }
+                    active?.takeIf { hasRealFrame && it.width > 0 && it.height > 0 }
+                        ?.let { it.width to it.height }
+                },
+                gpuFrameSize = {
+                    (cameraXGlPipe ?: glPipe)?.takeIf { it.frameWidth > 0 && it.frameHeight > 0 }
+                        ?.let { it.frameWidth to it.frameHeight }
+                }
             )
             // Initialize encoders with the streaming server helper
             h264StreamingEncoder = H264StreamingEncoder(this, streamingServerHelper!!) { Log.i(TAG, "H264: $it"); onLog?.invoke(it) }
@@ -790,7 +804,7 @@ class StreamingService : LifecycleService() {
                 OnvifStreamInfo(
                     rtspUrl = "$scheme://${getLocalIpAddress()}:$rtspPort${RtspServer.PATH}",
                     width = size.width, height = size.height, fps = fps,
-                    bitrateKbps = H264HardwareEncoder.bitrateFor(size.width, size.height) / 1000,
+                    bitrateKbps = H264HardwareEncoder.bitrateFor(size.width, size.height, mainBitrateKbps()) / 1000,
                 )
             },
             credentials = { streamCredentials() },
@@ -1066,6 +1080,7 @@ class StreamingService : LifecycleService() {
     private fun chooseApi(): String =
         when (val pref = PreferenceManager.getDefaultSharedPreferences(this).getString("capture_api", "auto") ?: "auto") {
             "camerax", "camera1" -> pref
+            "lg-main0-direct" -> if (LgG6Main0Profile.isTarget(camId())) pref else "camerax"
             else -> if (isLegacy()) "camera1" else "camerax"
         }
 
@@ -1079,7 +1094,8 @@ class StreamingService : LifecycleService() {
             val target = when (quality) {
                 "high" -> Size(1280, 720)
                 "medium" -> Size(960, 720)
-                "low" -> Size(800, 600)
+                "low" -> if (LgG6Main0Profile.isTarget(camId())) Size(960, 720)
+                         else Size(800, 600)
                 else -> Size(800, 600)
             }
             return fitToEncoderCaps(target.width, target.height, caps.maxW, caps.maxH)
@@ -1138,6 +1154,84 @@ class StreamingService : LifecycleService() {
     private fun streamFps(): Int =
         (PreferenceManager.getDefaultSharedPreferences(this).getString("stream_fps", "30")?.toIntOrNull() ?: 30).coerceIn(1, 60)
 
+    private fun mainBitrateKbps(): Int? =
+        PreferenceManager.getDefaultSharedPreferences(this)
+            .getString("stream_bitrate_kbps", "auto")?.toIntOrNull()?.takeIf { it in 250..100_000 }
+
+    /**
+     * Experimental CameraX-only high-resolution capture for GPU ROI. The output encoder
+     * still uses desiredSize(); capture size is independent so the 4K source isn't
+     * downscaled before selecting the region of interest.
+     */
+    private fun sourceCaptureSize(output: Size): Size {
+        val pref = PreferenceManager.getDefaultSharedPreferences(this)
+            .getString("capture_resolution", "match") ?: "match"
+        return when (pref) {
+            "3840x2160" -> Size(3840, 2160)
+            "4160x2340" -> Size(4160, 2340)
+            "4160x3120" -> Size(4160, 3120)
+            "4000x3000" -> Size(4000, 3000)
+            "3264x2448" -> Size(3264, 2448)
+            "2560x1440" -> Size(2560, 1440)
+            else -> output
+        }
+    }
+
+    private fun roiConfig(): Triple<Float, Float, Float> {
+        val p = PreferenceManager.getDefaultSharedPreferences(this)
+        val id = camId()
+        val phys = id?.substringAfter(':', id)
+        fun read(prefix: String, default: Float): Float =
+            (id?.let { p.getString(prefix + it, null) }
+                ?: phys?.let { p.getString(prefix + it, null) })?.toFloatOrNull() ?: default
+        return Triple(read("roi_zoom_", 1f).coerceIn(1f, 8f),
+            read("roi_x_", .5f).coerceIn(0f, 1f),
+            read("roi_y_", .5f).coerceIn(0f, 1f))
+    }
+
+    private fun lgMain0ZoomMode(p: SharedPreferences): String {
+        val requested = LgG6Main0Profile.zoomMode(p.getString(LgG6Main0Profile.PREF_ZOOM_MODE, "isp"))
+        return if (requested == "vendor" &&
+            LgG6Main0Profile.VENDOR_ZOOM !in LgG6Main0VendorProbe.capabilities(this)) "isp"
+        else requested
+    }
+
+    private fun lgMain0Zoom(p: SharedPreferences): Float =
+        (p.getString(LgG6Main0Profile.PREF_ZOOM, "4.0")?.toFloatOrNull() ?: 4f).coerceIn(1f, 8f)
+
+    /** Gamma below 1 brightens dark midtones in direct Camera2 only; 1 is unmodified. */
+    private fun lgDirectGamma(p: SharedPreferences): Float =
+        (p.getString("lg_main0_direct_gamma", "0.80")?.toFloatOrNull()
+            ?.takeIf { it.isFinite() } ?: .8f).coerceIn(.45f, 1.5f)
+
+    /**
+     * Camera0 default now preserves 4:3 photo sensor geometry, not 16:9.
+     * 960x720 uses 1040x780 source pixels at 4x from 4160x3120.
+     * 768x768 square uses a centered 780x780 crop at the same zoom.
+     */
+    private fun lgMain0OutputSize(shape: String?): String = when (shape) {
+        "1:1" -> "768x768"
+        "16:9" -> "960x540"
+        else -> "960x720"
+    }
+
+    private fun applyRoiToPipes() {
+        val (originalZoom, x, y) = roiConfig()
+        val p = PreferenceManager.getDefaultSharedPreferences(this)
+        // Never stack a 4x sensor crop and a 4x texture crop into an accidental 16x.
+        val zoom = if (LgG6Main0Profile.isTarget(camId())) {
+            if (lgMain0ZoomMode(p) == "gpu") lgMain0Zoom(p) else 1f
+        } else originalZoom
+        val fill = LgG6Main0Profile.isTarget(camId()) && lgMain0ZoomMode(p) == "gpu"
+        for (pipe in listOfNotNull(glPipe, cameraXGlPipe)) {
+            pipe.toneGamma = if (backend is LgG6Main0DirectCapture) lgDirectGamma(p) else 1f
+            pipe.cropToFillOutput = fill
+            pipe.roiZoom = zoom
+            pipe.roiCenterX = x
+            pipe.roiCenterY = y
+        }
+    }
+
     /**
      * The running session drew a camera frame lately, or only just started. One that stopped (camera
      * taken by another app, cameraserver restarted) is restarted by the next viewer change, as every
@@ -1146,6 +1240,7 @@ class StreamingService : LifecycleService() {
     private fun cameraDelivering(): Boolean {
         val lastFrameAt = when (val b = backend) {
             is CameraXCapture -> b.lastFrameAtMs
+            is LgG6Main0DirectCapture -> b.lastFrameAtMs
             is Camera1Capture -> glPipe?.lastFrameAtMs ?: 0L
             else -> 0L
         }
@@ -1256,7 +1351,6 @@ class StreamingService : LifecycleService() {
         }
         try {
             val generation = settingsGeneration
-            val want = desiredSize()
             val prefs = PreferenceManager.getDefaultSharedPreferences(this)
             // If no camera id has been resolved yet (fresh process / the UI never sent a camera
             // control), pin the facing-default to a real Camera2 id. Otherwise `camId()` falls back
@@ -1269,6 +1363,9 @@ class StreamingService : LifecycleService() {
                     prefs.edit().putString(PREF_CAMERA_ID, camId()).apply()
                 }
             }
+            // Resolve camera ID first: the LG-H872 auto 4:3 output default
+            // must be evaluated for the actual Camera0, not a "back" alias.
+            val want = desiredSize()
             val demand = cameraDemand()
             val surfaceEncoder = supportsSurfaceEncoder()
             val fps = streamFps()
@@ -1279,14 +1376,41 @@ class StreamingService : LifecycleService() {
             // never configures ImageAnalysis/ImageCapture. The backend choice only matters when
             // frames are actually needed (clients / recording / snapshot in flight): then honor the
             // API preference and a recent CameraX start without frames, which route to the Camera1 backend.
-            val useCamera1 = demand.frames && (chooseApi() == "camera1" || cameraXMissed)
-            if (useCamera1) {
+            val directSelected = chooseApi() == "lg-main0-direct" &&
+                LgG6Main0Profile.isTarget(camera) && surfaceEncoder && demand.h264 &&
+                !demand.mjpegViewers && !demand.motion && !demand.snapshot &&
+                !demand.screenPreview
+            val useCamera1 = !directSelected && demand.frames &&
+                (chooseApi() == "camera1" || cameraXMissed)
+            if (directSelected) {
+                val source = sourceCaptureSize(want)
+                try {
+                    startLgMain0DirectBackend(want, source)
+                    val direct = backend as? LgG6Main0DirectCapture
+                    var waited = 0L
+                    while (direct != null && !direct.failed && direct.lastFrameAtMs <= 0L &&
+                           waited < CAMERAX_FRAME_GRACE_MS + 2500L) {
+                        kotlinx.coroutines.delay(100)
+                        waited += 100L
+                    }
+                    if (direct == null || direct.failed || direct.lastFrameAtMs <= 0L) {
+                        Log.w(TAG, "LG0 direct photo-preview failed/no frames, falling back to CameraX")
+                        stopCamera()
+                        startCameraXBackend(source, demand, surfaceEncoder)
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "LG0 direct photo-preview unavailable, CameraX fallback", e)
+                    stopCamera()
+                    startCameraXBackend(source, demand, surfaceEncoder)
+                }
+            } else if (useCamera1) {
                 if (cameraXMissed) {
                     Log.i(TAG, "CameraX recently bound without frames on this device and frames are needed, using Camera1 backend")
                 }
                 startCamera1Backend(want, demand)
             } else {
-                startCameraXBackend(want, demand, surfaceEncoder)
+                val source = if (surfaceEncoder || !demand.h264) sourceCaptureSize(want) else want
+                startCameraXBackend(source, demand, surfaceEncoder)
                 // CameraX can bind without the session ever configuring (e.g. "Unable to configure
                 // camera ... TimeoutException") — no analysis frames ever arrive. Detect that and fall
                 // back to the Camera1 backend so streaming and snapshots keep working on such devices.
@@ -1418,6 +1542,66 @@ class StreamingService : LifecycleService() {
         Log.i(TAG, "stream ${camId()} api=camera1 ${cap.chosenW}x${cap.chosenH}")
     }
 
+    /**
+     * Direct LG-H872 camera0: ONE PRIVATE SurfaceTexture, with OEM PHOTO_ZSL
+     * request-template A/B, feeding the existing GL -> H.264 -> RTSP/ONVIF path.
+     * Incompatible use cases (MJPEG, snapshots, motion analysis, screen preview)
+     * are routed to CameraX before this method is entered.
+     */
+    private fun startLgMain0DirectBackend(want: Size, requestedSource: Size) {
+        val h264 = h264StreamingEncoder ?: throw IllegalStateException("No H264 encoder")
+        val source = LgG6Main0DirectCapture.chooseSource(this, requestedSource)
+            ?: throw IllegalStateException("No PRIVATE Camera0 SurfaceTexture size available")
+        if (source != requestedSource) {
+            Log.w(TAG, "LG0 requested ${requestedSource.width}x${requestedSource.height} not supported " +
+                "as PRIVATE; using ${source.width}x${source.height}")
+        }
+        val fps = streamFps().coerceIn(1, 30)
+        var encoded = surfaceEncoderSize(want)
+        fun createEncoder(size: Size) = H264HardwareEncoder(size.width, size.height, fps,
+            H264HardwareEncoder.bitrateFor(size.width, size.height, mainBitrateKbps()),
+            true) { data, key, pts -> h264.broadcastH264(data, key, pts) }
+        val encoder = try {
+            createEncoder(encoded)
+        } catch (first: Exception) {
+            // LG-H872 Qualcomm OMX refuses some legal-looking dimensions (e.g.
+            // 800x600 -> CodecException -1010), even when max width/height fit.
+            // Retry ONCE with chroma/OMX-aligned dimensions, preserving aspect.
+            val (w, h) = LgG6EncoderSizes.fallback16(encoded.width, encoded.height)
+            if (w == encoded.width && h == encoded.height) throw first
+            Log.w(TAG, "LG0 Qualcomm AVC rejected ${encoded.width}x${encoded.height}; " +
+                "retry aligned ${w}x${h}: ${first.message}")
+            encoded = Size(w, h)
+            createEncoder(encoded)
+        }
+        h264.setEncoder(encoder)
+        streamingServerHelper?.resetH264Wait()
+        val pipe = CameraGlPipe(encoder.inputSurface!!, encoded.width, encoded.height, fps,
+            standardBuffer = false).also {
+            it.mirror = readMirrorPref()
+            it.rotation = quantizedRotation(readRotatePref())
+            // A 4:3 13MP camera source must fill a 16:9 output without letterboxing.
+            it.cropToFillOutput = true
+            it.toneGamma = lgDirectGamma(
+                PreferenceManager.getDefaultSharedPreferences(this))
+            val (xZoom, x, y) = roiConfig()
+            val p = PreferenceManager.getDefaultSharedPreferences(this)
+            it.roiZoom = if (lgMain0ZoomMode(p) == "gpu") lgMain0Zoom(p) else 1f
+            it.roiCenterX = x
+            it.roiCenterY = y
+            it.start()
+            it.setCameraBufferSize(source.width, source.height)
+            cameraXGlPipe = it
+        }
+        val direct = LgG6Main0DirectCapture(this, source, pipe.inputSurface) { msg ->
+            Log.i(TAG, "LG0 Camera2 direct: $msg")
+        }
+        backend = direct
+        direct.start()
+        Log.i(TAG, "LG0 Direct requested=${requestedSource.width}x${requestedSource.height} " +
+            "PRIVATE=${source.width}x${source.height} H264=${encoded.width}x${encoded.height}")
+    }
+
     private fun startCameraXBackend(want: Size, demand: CameraDemand, surfaceEncoder: Boolean) {
         // CameraX → ImageAnalysis YUV → encoders + optional Preview on the phone.
         val h264 = h264StreamingEncoder
@@ -1431,7 +1615,7 @@ class StreamingService : LifecycleService() {
                 size.width,
                 size.height,
                 fpsCoerced,
-                H264HardwareEncoder.bitrateFor(size.width, size.height),
+                H264HardwareEncoder.bitrateFor(size.width, size.height, mainBitrateKbps()),
                 true // useSurface = true
             ) { d, k, pts -> h264.broadcastH264(d, k, pts) }
 
@@ -1439,7 +1623,7 @@ class StreamingService : LifecycleService() {
             // If the encoder rejects the portrait size, fall back to the byte-buffer YUV path,
             // which rotates in software — never to a landscape surface frame, which would make a
             // 90°/270° stream look horizontal.
-            val frame = surfaceEncoderSize(want)
+            val frame = surfaceEncoderSize(desiredSize())
             val enc = try {
                 newEncoder(frame)
             } catch (e: Exception) {
@@ -1457,6 +1641,13 @@ class StreamingService : LifecycleService() {
                 val pipe = CameraGlPipe(enc.inputSurface!!, enc.width, enc.height, fpsCoerced, standardBuffer = true).also {
                     it.mirror = readMirrorPref()
                     it.rotation = quantizedRotation(readRotatePref())
+                    val (originalZoom, x, y) = roiConfig()
+                    val p = PreferenceManager.getDefaultSharedPreferences(this@StreamingService)
+                    val zoom = if (LgG6Main0Profile.isTarget(camId())) {
+                        if (lgMain0ZoomMode(p) == "gpu") lgMain0Zoom(p) else 1f
+                    } else originalZoom
+                    it.cropToFillOutput = LgG6Main0Profile.isTarget(camId()) && lgMain0ZoomMode(p) == "gpu"
+                    it.roiZoom = zoom; it.roiCenterX = x; it.roiCenterY = y
                     it.start()
                     cameraXGlPipe = it
                 }
@@ -1499,7 +1690,12 @@ class StreamingService : LifecycleService() {
                 // Motion detection reads the luma plane without disturbing the encoders' buffers.
                 motionMonitor?.processFrame(img)
                 cameraXGlPipe?.let { pipe ->
-                    pipe.frameWidth = img.width; pipe.frameHeight = img.height
+                    // The Preview.SurfaceRequest's negotiated size is the GPU input size.
+                    // Do not overwrite it with ImageAnalysis dimensions; they can differ.
+                    if (pipe.frameWidth <= 0 || pipe.frameHeight <= 0) {
+                        pipe.frameWidth = img.width
+                        pipe.frameHeight = img.height
+                    }
                 }
                 val recording = localRecorder?.isRecording == true || recordingNeeded
                 val activeEncoders = encoders.filter { it.hasClients() }
@@ -1656,12 +1852,14 @@ class StreamingService : LifecycleService() {
         val fps = prefs.getString("stream_fps", "30")?.toIntOrNull() ?: 30
         val fpsCoerced = fps.coerceIn(1, 60)
         val frame = surfaceEncoderSize(cameraSize)
-        val enc = H264HardwareEncoder(frame.width, frame.height, fpsCoerced, H264HardwareEncoder.bitrateFor(frame.width, frame.height), true) { d, k, pts -> h264StreamingEncoder?.broadcastH264(d, k, pts) }
+        val enc = H264HardwareEncoder(frame.width, frame.height, fpsCoerced, H264HardwareEncoder.bitrateFor(frame.width, frame.height, mainBitrateKbps()), true) { d, k, pts -> h264StreamingEncoder?.broadcastH264(d, k, pts) }
         h264StreamingEncoder?.setEncoder(enc)
         streamingServerHelper?.resetH264Wait()
         return CameraGlPipe(enc.inputSurface!!, frame.width, frame.height, fpsCoerced).also {
             it.mirror = readMirrorPref()
             it.rotation = quantizedRotation(readRotatePref())
+            val (zoom, x, y) = roiConfig()
+            it.roiZoom = zoom; it.roiCenterX = x; it.roiCenterY = y
             it.start()
             // Camera1 renders at [cameraSize]; the pipe turns that frame into [frame].
             it.setCameraBufferSize(cameraSize.width, cameraSize.height)
@@ -1695,14 +1893,58 @@ class StreamingService : LifecycleService() {
             p.contains("zoom_$phys") -> p.getString("zoom_$phys", null)
             else -> null
         }
-        zoom?.toFloatOrNull()?.let { b.setZoom(it) }
+        if (LgG6Main0Profile.isTarget(id)) {
+            val lgZoom = lgMain0Zoom(p)
+            when (lgMain0ZoomMode(p)) {
+                "isp" -> { b.setLgVendorZoom(null); b.setZoom(lgZoom) }
+                "gpu" -> { b.setLgVendorZoom(null); b.setZoom(1f) }
+                "vendor" -> {
+                    // Dangerous/nonstandard mode is opt-in only. Never leave CameraX
+                    // standard zoom active while applying the LG vendor request.
+                    b.setZoom(1f)
+                    b.setLgVendorZoom(lgZoom)
+                }
+            }
+            b.setLgPostRawBoost(p.getString(LgG6Main0Profile.PREF_POST_RAW_BOOST, "100")
+                ?.toIntOrNull()?.takeIf { it > 100 })
+            b.setLgFocusPeaking(p.getBoolean(LgG6Main0Profile.PREF_PEAKING, false))
+            b.setLgPhotoProcessing(p.getString("lg_main0_processing", "off") ?: "off")
+            b.setLgPreviewProfile(p.getString("lg_main0_preview_profile", "zsl") ?: "zsl")
+            b.setLgExtendedIso(p.getBoolean(LgG6Main0Profile.PREF_EXTENDED_ISO, false))
+            applyRoiToPipes()
+        } else zoom?.toFloatOrNull()?.let { b.setZoom(it) }
 
         val focus = when {
             p.contains("focus_$id") -> p.getString("focus_$id", null)
             p.contains("focus_$phys") -> p.getString("focus_$phys", null)
             else -> null
         }
-        focus?.toFloatOrNull()?.let { b.setManualFocus(it) }
+        if (LgG6Main0Profile.isTarget(id)) {
+            if (p.getString(LgG6Main0Profile.PREF_FOCUS_MODE, "auto") == "diopters") {
+                val d = p.getString(LgG6Main0Profile.PREF_FOCUS_DIOPTERS, "0.25")
+                    ?.toFloatOrNull() ?: .25f
+                b.setFocusDiopters(d.coerceIn(0f, 10f))
+            } else {
+                // Ignore stale generic focus_distance from an older UI session.
+                // AUTO really means AF, not the previously saved normalized focus.
+                b.setManualFocus(-1f)
+                b.setFocusDiopters(null)
+            }
+        } else {
+            focus?.toFloatOrNull()?.let { b.setManualFocus(it) }
+        }
+        // Restore manual sensor settings after opening the camera; nulls restore AE.
+        val mode = p.getString("manual_exposure_mode_$id",
+            p.getString("manual_exposure_mode_$phys", "auto"))
+        if (mode == "manual") {
+            val iso = p.getString("manual_iso_$id",
+                p.getString("manual_iso_$phys", "400"))?.toIntOrNull() ?: 400
+            val shutter = p.getString("manual_shutter_us_$id",
+                p.getString("manual_shutter_us_$phys", "20000"))?.toLongOrNull() ?: 20000L
+            b.setManualExposure(iso, shutter)
+        } else {
+            b.setManualExposure(null, null)
+        }
     }
 
     /** Rear camera id that owns the flash unit (usually the main lens). Auxiliary rear lenses on
@@ -2107,12 +2349,110 @@ class StreamingService : LifecycleService() {
                 if (physicalId.isNotBlank() && physicalId != id) prefs.edit().putString("exposure_$physicalId", ev.toString()).apply()
                 launchMain { backend?.setExposure(ev) }
             }
+            "exposure_mode", "manual_iso", "manual_shutter_us" -> {
+                if (id == null) return
+                val normalized = when (key) {
+                    "exposure_mode" -> value.takeIf { it == "auto" || it == "manual" } ?: return
+                    "manual_iso" -> value.toIntOrNull()?.takeIf { it in 25..204800 }?.toString() ?: return
+                    else -> value.toLongOrNull()?.takeIf { it in 1L..1_000_000L }?.toString() ?: return
+                }
+                val prefix = when (key) {
+                    "exposure_mode" -> "manual_exposure_mode_"
+                    "manual_iso" -> "manual_iso_"
+                    else -> "manual_shutter_us_"
+                }
+                val edit = prefs.edit().putString(prefix + id, normalized)
+                if (physicalId.isNotBlank() && physicalId != id) edit.putString(prefix + physicalId, normalized)
+                edit.apply()
+                // One atomic snapshot of all three preferences; changing ISO never resets focus.
+                val mode = prefs.getString("manual_exposure_mode_$id", "auto")
+                val iso = prefs.getString("manual_iso_$id", "400")?.toIntOrNull() ?: 400
+                val shutter = prefs.getString("manual_shutter_us_$id", "20000")?.toLongOrNull() ?: 20000L
+                launchMain {
+                    backend?.setManualExposure(
+                        if (mode == "manual") iso else null,
+                        if (mode == "manual") shutter else null)
+                }
+            }
+            "lg_main0_preset" -> {
+                if (!LgG6Main0Profile.isTarget(id)) return
+                if (value !in listOf("isp4", "gpu4", "safe")) return
+                val edit = prefs.edit()
+                    .putString(LgG6Main0Profile.PREF_ZOOM_MODE,
+                        if (value == "gpu4") "gpu" else "isp")
+                    .putString(LgG6Main0Profile.PREF_ZOOM, if (value == "safe") "1.0" else "4.0")
+                    .putString("stream_res", lgMain0OutputSize(
+                        prefs.getString("lg_main0_output_shape", "4:3")))
+                    .putString("capture_resolution", if (value == "gpu4") "4160x3120" else "match")
+                    .putString("stream_fps", "15")
+                    .putString("stream_bitrate_kbps", "2000")
+                    .putString("mjpeg_quality", "90")
+                edit.apply()
+                if (localRecorder?.isRecording != true) debouncedStartCamera()
+            }
+            "lg_main0_output_shape" -> {
+                if (!LgG6Main0Profile.isTarget(id)) return
+                if (value !in listOf("4:3", "1:1", "16:9")) return
+                prefs.edit()
+                    .putString("lg_main0_output_shape", value)
+                    .putString("stream_res", lgMain0OutputSize(value))
+                    .apply()
+                if (localRecorder?.isRecording != true) debouncedStartCamera()
+            }
+            "lg_main0_zoom_mode", "lg_main0_zoom", "lg_main0_direct_gamma",
+            "lg_main0_direct_ae_fps", "lg_main0_focus_mode",
+            "lg_main0_focus_diopters", "lg_main0_postraw_boost", "lg_main0_peaking",
+            "lg_main0_telemetry", "lg_main0_processing", "lg_main0_preview_profile",
+            "lg_main0_extended_iso" -> {
+                if (!LgG6Main0Profile.isTarget(id)) return
+                val saved = when (key) {
+                    "lg_main0_processing" -> value.takeIf { it in listOf("off", "fast", "hq") } ?: return
+                    "lg_main0_preview_profile" -> value.takeIf {
+                        it in listOf("zsl", "video", "default", "fast", "hq") } ?: return
+                    "lg_main0_zoom_mode" -> value.takeIf { it in listOf("isp", "gpu", "vendor") } ?: return
+                    "lg_main0_zoom" -> value.toFloatOrNull()?.takeIf { it.isFinite() && it in 1f..8f }
+                        ?.toString() ?: return
+                    "lg_main0_direct_gamma" -> value.toFloatOrNull()
+                        ?.takeIf { it.isFinite() && it in .45f..1.5f }?.toString() ?: return
+                    "lg_main0_direct_ae_fps" -> value.takeIf {
+                        it == "adaptive" || it == "fixed" } ?: return
+                    "lg_main0_focus_mode" -> value.takeIf { it == "auto" || it == "diopters" } ?: return
+                    "lg_main0_focus_diopters" -> value.toFloatOrNull()
+                        ?.takeIf { it.isFinite() && it in 0f..10f }?.toString() ?: return
+                    "lg_main0_postraw_boost" -> value.toIntOrNull()?.takeIf { it in 100..400 }
+                        ?.toString() ?: return
+                    else -> value.takeIf { it == "true" || it == "false" } ?: return
+                }
+                val editor = prefs.edit()
+                if (key == "lg_main0_peaking" || key == "lg_main0_telemetry" ||
+                    key == "lg_main0_extended_iso")
+                    editor.putBoolean(key, saved.toBoolean())
+                else editor.putString(key, saved)
+                if (key == "lg_main0_focus_mode" && saved == "auto") {
+                    editor.remove("focus_$id")
+                    if (physicalId.isNotBlank() && physicalId != id) editor.remove("focus_$physicalId")
+                }
+                editor.apply()
+                if (key == "lg_main0_telemetry") {
+                    // Session CaptureCallback is attached during CameraX use-case binding.
+                    if (captureRunning && localRecorder?.isRecording != true) debouncedStartCamera()
+                } else launchMain {
+                    val active = backend
+                    if (active != null) applyStored(active)
+                    applyRoiToPipes()
+                }
+            }
             "zoom" -> {
                 val z = value.toFloatOrNull() ?: return
                 val zStr = String.format(Locale.US, "%.1f", z)
                 prefs.edit().putString("zoom_$id", zStr).apply()
                 if (physicalId.isNotBlank() && physicalId != id) prefs.edit().putString("zoom_$physicalId", zStr).apply()
-                launchMain { backend?.setZoom(z) }
+                launchMain {
+                    if (LgG6Main0Profile.isTarget(id)) {
+                        prefs.edit().putString(LgG6Main0Profile.PREF_ZOOM, z.coerceIn(1f,8f).toString()).apply()
+                        applyStored(backend ?: return@launchMain)
+                    } else backend?.setZoom(z)
+                }
             }
             "focus_distance" -> {
                 val f = value.toFloatOrNull() ?: return
@@ -2123,7 +2463,17 @@ class StreamingService : LifecycleService() {
                     prefs.edit().putString("focus_$id", f.coerceIn(0f, 1f).toString()).apply()
                     if (physicalId.isNotBlank() && physicalId != id) prefs.edit().putString("focus_$physicalId", f.coerceIn(0f, 1f).toString()).apply()
                 }
-                launchMain { backend?.setManualFocus(f) }
+                if (LgG6Main0Profile.isTarget(id)) {
+                    val editor = prefs.edit()
+                    if (f >= 0f) {
+                        // Generic focus slider is manual focus, not auto.
+                        editor.putString(LgG6Main0Profile.PREF_FOCUS_MODE, "diopters")
+                        editor.putString(LgG6Main0Profile.PREF_FOCUS_DIOPTERS,
+                            (f.coerceIn(0f, 1f) * 10f).toString())
+                    } else editor.putString(LgG6Main0Profile.PREF_FOCUS_MODE, "auto")
+                    editor.apply()
+                    launchMain { backend?.let { applyStored(it) } }
+                } else launchMain { backend?.setManualFocus(f) }
             }
             "snapshot_res" -> {
                 if (value == "max" || value == "stream") {
@@ -2181,6 +2531,34 @@ class StreamingService : LifecycleService() {
                         debouncedStartCamera()
                     }
                 }
+            }
+            "capture_resolution" -> {
+                if (value !in listOf("match", "2560x1440", "3840x2160", "4160x2340",
+                        "4160x3120", "4000x3000", "3264x2448")) return
+                prefs.edit().putString("capture_resolution", value).apply()
+                if (localRecorder?.isRecording != true) debouncedStartCamera()
+            }
+            "roi_zoom", "roi_x", "roi_y" -> {
+                if (id == null) return
+                val n = value.toFloatOrNull()?.takeIf { it.isFinite() } ?: return
+                val allowed = if (key == "roi_zoom") n in 1f..8f else n in 0f..1f
+                if (!allowed) return
+                val edit = prefs.edit().putString("${key}_$id", n.toString())
+                if (physicalId.isNotBlank() && physicalId != id)
+                    edit.putString("${key}_$physicalId", n.toString())
+                edit.apply()
+                launchMain { applyRoiToPipes() }
+            }
+            "stream_bitrate_kbps" -> {
+                val kbps = value.toIntOrNull()
+                if (value != "auto" && (kbps == null || kbps !in 250..100_000)) return
+                prefs.edit().putString("stream_bitrate_kbps", value).apply()
+                // Surface and YUV encoders read this preference when they are created.
+                if (captureRunning && localRecorder?.isRecording != true) debouncedStartCamera()
+            }
+            "mjpeg_quality" -> {
+                if (value != "auto" && (value.toIntOrNull() ?: 0) !in 30..100) return
+                prefs.edit().putString("mjpeg_quality", value).apply()
             }
             // RTSP sub stream and audio settings. The RTSP server reads them when a viewer
             // connects, so a change applies to the next connection (as the old Settings screen did).
@@ -2257,7 +2635,8 @@ class StreamingService : LifecycleService() {
                 }
             }
             "api" -> {
-                if (value in listOf("auto", "camerax", "camera1")) {
+                if (value in listOf("auto", "camerax", "camera1", "lg-main0-direct") &&
+                    (value != "lg-main0-direct" || LgG6Main0Profile.isTarget(id))) {
                     prefs.edit().putString("capture_api", value).apply()
                     // Explicitly choosing CameraX again re-tests the device (clears the remembered
                     // CameraX starts without frames).

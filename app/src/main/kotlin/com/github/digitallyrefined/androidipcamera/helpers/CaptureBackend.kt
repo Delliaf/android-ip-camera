@@ -29,5 +29,23 @@ interface CaptureBackend {
      * continuous autofocus. Backends apply this on a best-effort basis.
      */
     fun setManualFocus(distance: Float)
+    /**
+     * Fixed ISO + sensor exposure (microseconds). Nulls restore auto exposure.
+     * Legacy Camera1 implementations do not support this; Camera2 will check MANUAL_SENSOR.
+     */
+    fun setManualExposure(iso: Int?, shutterUs: Long?) {}
+    /** Precise absolute focus (diopters): null returns to autofocus. */
+    fun setFocusDiopters(diopters: Float?) {}
+    /** Experimental LG vendor zoom; null disables it, always guard by target/capability. */
+    fun setLgVendorZoom(zoom: Float?) {}
+    /** LG camera0 optional post-RAW digital gain, 100 = 1x. */
+    fun setLgPostRawBoost(percent: Int?) {}
+    /** LG focus peaking vendor request; effect is HAL/device-specific. */
+    fun setLgFocusPeaking(enabled: Boolean) {}
+    /** Standard CameraX NR/EDGE choices: off, fast or hq. */
+    fun setLgPhotoProcessing(mode: String) {}
+    /** Direct Camera2 repeating-request profile (video/ZSL/default/fast/hq). */
+    fun setLgPreviewProfile(profile: String) {}
+    fun setLgExtendedIso(enabled: Boolean) {}
     fun stop()
 }

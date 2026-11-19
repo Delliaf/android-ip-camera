@@ -55,6 +55,23 @@ class MjpegStreamingEncoder(
         return null
     }
 
+    private fun roiFor(prefs: android.content.SharedPreferences, camId: String?, w: Int, h: Int): android.graphics.Rect {
+        val phys = camId?.substringAfter(':', camId)
+        fun read(prefix: String, default: Float): Float {
+            val v = (camId?.let { prefs.getString(prefix + it, null) }
+                ?: phys?.let { prefs.getString(prefix + it, null) })?.toFloatOrNull()
+            return v ?: default
+        }
+        // In LG0 ISP/vendor zoom modes Camera2 has already cropped its output.
+        // Never perform another 4x in JPEG mode (would make an accidental 16x).
+        val zoom = if (LgG6Main0Profile.isTarget(camId)) {
+            if (LgG6Main0Profile.zoomMode(prefs.getString(LgG6Main0Profile.PREF_ZOOM_MODE, "isp")) == "gpu")
+                (prefs.getString(LgG6Main0Profile.PREF_ZOOM, "4.0")?.toFloatOrNull() ?: 4f)
+            else 1f
+        } else read("roi_zoom_", 1f)
+        return nv21RoiRect(w, h, zoom, read("roi_x_", .5f), read("roi_y_", .5f))
+    }
+
     private var lastFrameTime = 0L
     private var captureRunning = false
 
@@ -101,7 +118,12 @@ class MjpegStreamingEncoder(
                 }
             }
             val quality = DeviceMemoryHelper.mjpegJpegQuality(context)
-            var jpegBytes = convertNV21toJPEG(nv21, image.width, image.height, quality)
+            // convertYUV420toNV21() respects ImageProxy.cropRect; use the same
+            // dimensions when constructing YuvImage, or some HALs reject the data.
+            val sourceW = image.cropRect.width()
+            val sourceH = image.cropRect.height()
+            var jpegBytes = convertNV21toJPEG(nv21, sourceW, sourceH, quality,
+                roiFor(prefs, camId, sourceW, sourceH))
             val needsTransform = totalRotation != 0 || scaleFactor != 1.0f || contrastValue != 0 || mirror
             if (needsTransform) {
                 jpegBytes = applyTransformations(jpegBytes, totalRotation, scaleFactor, contrastValue, quality, mirror)
@@ -150,7 +172,7 @@ class MjpegStreamingEncoder(
             } else false
 
             val quality = DeviceMemoryHelper.mjpegJpegQuality(context)
-            var jpegBytes = convertNV21toJPEG(nv21, width, height, quality)
+            var jpegBytes = convertNV21toJPEG(nv21, width, height, quality, roiFor(prefs, camId, width, height))
             val needsTransform = totalRotation != 0 || scaleFactor != 1.0f || contrastValue != 0 || mirror
             if (needsTransform) {
                 jpegBytes = applyTransformations(jpegBytes, totalRotation, scaleFactor, contrastValue, quality, mirror)
