@@ -42,5 +42,9 @@ interface CaptureBackend {
     fun setLgPostRawBoost(percent: Int?) {}
     /** LG focus peaking vendor request; effect is HAL/device-specific. */
     fun setLgFocusPeaking(enabled: Boolean) {}
+    /** Standard CameraX NR/EDGE choices: off, fast or hq. */
+    fun setLgPhotoProcessing(mode: String) {}
+    /** Direct Camera2 repeating-request profile (video/ZSL/default/fast/hq). */
+    fun setLgPreviewProfile(profile: String) {}
     fun stop()
 }
