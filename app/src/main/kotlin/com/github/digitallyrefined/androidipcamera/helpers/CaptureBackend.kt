@@ -34,5 +34,13 @@ interface CaptureBackend {
      * Legacy Camera1 implementations do not support this; Camera2 will check MANUAL_SENSOR.
      */
     fun setManualExposure(iso: Int?, shutterUs: Long?) {}
+    /** Precise absolute focus (diopters): null returns to autofocus. */
+    fun setFocusDiopters(diopters: Float?) {}
+    /** Experimental LG vendor zoom; null disables it, always guard by target/capability. */
+    fun setLgVendorZoom(zoom: Float?) {}
+    /** LG camera0 optional post-RAW digital gain, 100 = 1x. */
+    fun setLgPostRawBoost(percent: Int?) {}
+    /** LG focus peaking vendor request; effect is HAL/device-specific. */
+    fun setLgFocusPeaking(enabled: Boolean) {}
     fun stop()
 }
