@@ -86,8 +86,8 @@ internal class LgG6Main0DirectCapture(
             val actual = result.get(android.hardware.camera2.CaptureResult.SENSOR_SENSITIVITY)
             val aeOff = request.get(CaptureRequest.CONTROL_AE_MODE) == CaptureRequest.CONTROL_AE_MODE_OFF
             val reportedMax = characteristics.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)?.upper ?: 800
-            if (allowExtendedIso && aeOff && requested != null && requested > reportedMax &&
-                actual != null && actual < requested * .90) {
+            if (allowExtendedIso && aeOff && requested != null && actual != null &&
+                LgG6IsoVerification.extendedRequestIgnored(requested, actual, reportedMax)) {
                 unsupportedManualIsoFrames++
                 if (unsupportedManualIsoFrames >= 30) {
                     unsupportedManualIsoFrames = 0
