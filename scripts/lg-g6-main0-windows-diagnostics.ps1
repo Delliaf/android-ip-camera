@@ -41,5 +41,5 @@ for($i=5;$i -le $Seconds;$i+=5){
 Logs 'log-after.txt'
 "Read-only. Root available: $root. Contains possibly sensitive device IDs, network and logs. REVIEW before sharing." |
  Set-Content -LiteralPath (Join-Path $dir 'README.txt') -Encoding UTF8
-$zip=$dir+'.zip'; Compress-Archive -LiteralPath (Join-Path $dir '*') -DestinationPath $zip -Force
+$zip=$dir+'.zip'; Compress-Archive -Path (Join-Path $dir '*') -DestinationPath $zip -Force
 Write-Host "DONE: $zip"
