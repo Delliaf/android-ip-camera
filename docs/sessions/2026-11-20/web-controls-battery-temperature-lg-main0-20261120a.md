@@ -37,3 +37,28 @@
 1. Создать независимый testable router и API для control, переставить старый обработчик перед HTML.
 2. Добавить battery thermal independently и UI.
 3. Запустить CI и проверить SHA/artifact, записать любые ошибки; user hardware test ещё не проведён.
+
+
+### 2026-11-20 — исправление внесено в отдельную ветку, CI запущен
+
+- Ветка `fix/web-controls-battery-temp-20261120` от `fix/lg-g6-metrics-visible`; [draft PR #6](https://github.com/Delliaf/android-ip-camera/pull/6) в ту же базовую ветку.
+- `helpers/WebControlRoute.kt`: чистая логика распознавания legacy root control query, исключение `/?v=...`, проверка key/value.
+- `helpers/StreamingServerHelper.kt`: раньше `GET /?focus_distance=...` возвращал HTML, теперь обработка управляющих запросов **перед рендером страницы**. Добавлен `POST /control/set?key=...&value=...&ts=...` с JSON `{ok:true,forwarded:true,keys:[...],timestamp:...}`, 405/400/500 при ошибках. Legacy GET и reset camera сохранены. Ответ `forwarded` сообщает только о вызове обработчика, не доказывает фактическую работу драйвера.
+- `index.html`: новый sendControl на отдельном POST endpoint, проверяет JSON + указанный ключ, выводит успех/ошибку рядом с контролами и предупреждает в console; больше не считает HTML-содержимое успешным ответом.
+- `helpers/DevicePerformanceMonitor.kt`: независимые измерения SoC/CPU и batteryTemperatureCelsius; battery читается раз в 20 секунд через ACTION_BATTERY_CHANGED, не теряется при работающем SoC датчике; SoC не подменяется температурой АКБ.
+- `/metrics.json`, `/info.json`: новое `batteryTemperatureCelsius`; на веб-панели отдельный `🌡️ АКБ xx.x°C` и CPU/SoC остаётся отдельно.
+- Проверки: `WebControlRouteTest.kt` (focus/zoom/root query/media endpoints/input guards); `DevicePerformanceMonitorTest.kt` (battery tenths); `scripts/test-web-controls.cjs` (реальный JS sender принимает корректный JSON, отклоняет HTML/401/неправильный ключ); `scripts/test-metrics-dashboard.cjs` (SoC и батарея одновременно в overlay).
+- Версия: `0.18.0-delliaf.9` / versionCode `189`, ARM64-V8A only, Android8; CI workflow расширен новой веткой и JS тестом. **Точный функциональный HEAD до документационной записи:** `9f7c24508e8210ce7b4e38d499924429639a9b57`.
+- [CI run #44623993393](https://github.com/Delliaf/android-ip-camera/actions/runs/44623993393) на момент записи находится в `in_progress` (Gradle JVM test + assemble). **Не считать APK готовым без SUCCESS**; предыдущий run 44623985932 отменён по concurrency при следующем функциональном коммите.
+
+### Результаты архива — подробная общая документация
+
+Создан [docs/workstreams/camera-lg-g6/2026-11-20-h872-4p5x-real-yuv-results.md](../../workstreams/camera-lg-g6/2026-11-20-h872-4p5x-real-yuv-results.md) с обезличенными 73/73 YUV 4160×3120 результатами, предупреждениями RECORD(3) dark и разделением SoC/аккумулятора.
+
+### Остаточные обязательные проверки
+
+1. Ожидается итог GitHub Actions #44623993393 для SHA 9f7c2450; при ошибке исправить код, перезапустить и записать новый SHA/run/исход ошибок.
+2. Реальный LG H872 после установки: проверить **фокусировку, zoom, ISO/exposure, переключение camera**, запросы `/control/set` и legacy `/?focus_distance=...`, наличие JSON ack, фактический CaptureResult. Стабильный feedback на web panel.
+3. Проверить `/metrics.json`: одновременно числовые `temperatureCelsius` (CPU/SoC) и `batteryTemperatureCelsius`; правильные подписи, не подменять SoC батареей.
+4. Regression: StreamingService restart, Camera0 benchmark, RTSP/ONVIF go2rtc, снижение FPS и температурные лимиты.
+5. Нельзя публиковать приватный ZIP/кадры в public GitHub.
