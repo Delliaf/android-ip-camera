@@ -351,7 +351,12 @@ class SettingsActivity : AppCompatActivity() {
                             "ONVIF HTTP is now available on the LAN; credentials are not encrypted",
                             Toast.LENGTH_LONG).show()
                     }
-                    restartStreamingServer()
+                    // Preference callbacks run before the new value is persisted.
+                    // Schedule restart for the next main-loop turn so ONVIF opens
+                    // with the NEW TLS transport, not the previous setting.
+                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                        restartStreamingServer()
+                    }
                     true
                 }
             }
