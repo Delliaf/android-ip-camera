@@ -269,9 +269,17 @@ internal class LgG6Main0DirectCapture(
             val compensated = if (compensationRange == null) ev
                 else ev.coerceIn(compensationRange.lower, compensationRange.upper)
             b.set(CaptureRequest.CONTROL_AE_EXPOSURE_COMPENSATION, compensated)
-                val ranges = characteristics.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES)
-                ranges?.firstOrNull { it.lower <= fps && it.upper >= fps }?.let {
-                    b.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, it)
+                val ranges = characteristics.get(
+                    CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES)
+                val adaptive = pref.getString("lg_main0_direct_ae_fps", "adaptive") != "fixed"
+                val chosen = ranges?.let { advertised ->
+                    LgG6AeFps.select(advertised.map { it.lower to it.upper }, fps, adaptive)
+                }
+                chosen?.let { selected ->
+                    b.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE,
+                        android.util.Range(selected.first, selected.second))
+                    Log.i(TAG, "Direct Camera0 AE FPS range selected $selected " +
+                        "(target=$fps, adaptive=$adaptive)")
                 }
             }
             s.setRepeatingRequest(b.build(), resultCallback, handler)
