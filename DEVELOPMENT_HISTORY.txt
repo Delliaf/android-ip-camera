@@ -669,3 +669,70 @@ FIRST ON-DEVICE STEPS:
 6. Append actual device results and changes to THIS FILE before merging.
 All PRs #1/#2/#3/#4 remain experimental and draft pending LG device tests.
 ==============================================================================
+
+
+2026-11-19 — LG G6 CPU / TEMPERATURE NOT VISIBLE: OVERLAY FIX
+==============================================================================
+USER OBSERVATION:
+  Battery charge and Wi-Fi displayed on web camera overlay; CPU load and
+  CPU temperature were absent in the installed APK despite source work.
+  No fresh device log/screenshot was provided, so a specific on-device
+  source permission failure is NOT proven.
+
+SOURCE AUDIT AND DEFECTS:
+  1. app/src/main/assets/index.html previously set cpuStatus and
+     temperatureStatus display:none when CPU==-1 / temperature null.
+     On Android8 first CPU sample has no reference delta by design; if
+     thermal sysfs is blocked, temperature null. This hid the fields
+     entirely without explaining anything.
+  2. /metrics.json fetch errors were swallowed by .catch(() => {});
+     stale/inaccessible endpoint gave no visible failure indication.
+  3. HTML root lacked Cache-Control; browsers could retain an old index
+     whose DOM did not even contain CPU/temperature spans after update.
+     Root served only exact "/" not "/?v=..." so cache-busting query
+     would yield 404; now path-based root routing works.
+  4. DevicePerformanceMonitor did not recognize Qualcomm "tsens_tz_sensor"
+     SoC thermal zones, using battery fallback even when die readings
+     were available. Rooted LG H872 may need read-only su access for
+     protected /sys/class/thermal and /proc/stat.
+
+IMPLEMENTATION:
+  BRANCH: fix/lg-g6-metrics-visible
+  BASE: feature/lg-main0-auto-image-benchmark, includes .7 auto image tests.
+  VERSION: 0.18.0-delliaf.8 / versionCode 188.
+  - CPU warm-up or missing measurement now visibly reads CPU … rather
+    than hiding the badge. If only app CPU is permitted: App CPU xx%.
+  - Temperature label displays CPU/SoC if found by type, otherwise
+    correctly labels "Battery", or Temp — when no data available;
+    accurate absence vs battery fallback is made explicit in tooltip.
+  - /metrics.json failures now produce CPU — / Temp — and console warning,
+    not silent disappearance. Poll immediately then every 5 seconds.
+  - Root HTML response adds no-store, max-age=0 and charset=utf-8.
+    /?v=8 now loads the dashboard, avoiding old cached versions.
+  - /metrics.json contains cpuNote/temperatureNote, metricsVersion=2,
+    explicit Content-Length, no-store.
+  - CPU system sampled from /proc/stat if possible, app-process fallback
+    otherwise. Qualcomm tsens zones reported as SoC, never asserted to
+    represent exact CPU core temperature.
+  - Settings > Device Monitoring > Use root for CPU/SoC temperature:
+    optional, OFF by default, read-only static shell probes with 900ms
+    timeout. Root failure disables further probes in this session,
+    avoiding repeated root permission dialogs/blocking HTTP service.
+  - scripts/test-metrics-dashboard.cjs exercises the actual web UI
+    renderer with missing/first sample, App CPU + Battery fallback,
+    System CPU + SoC. DevicePerformanceMonitorTest extended for
+    Qualcomm sensor naming. CI now tests both JS and Kotlin, targets
+    Android8 ARM64-V8A only.
+
+MUST STILL VERIFY ON LG H872:
+  - /metrics.json fetched from live phone (use authenticated HTTPS/HTTP
+    same as web UI), includes cpuPercent, cpuScope, temperatureSource.
+  - web overlay after 5-10s shows actual number or explicit unavailable
+    status. Root optional toggle only if CPU/SoC inaccessible.
+  - temp from tsens may be die/SoC, not CPU core. Battery temperature
+    always labeled Battery.
+  - after installing new APK, open ?v=8 to avoid stale cached index.
+  - average memory/CPU overhead, repeated reconnect, stream stability.
+  - exact successful CI run ID/SHA/artifact MUST be appended after build.
+  - no private logs/images uploaded to public repository.
+==============================================================================
