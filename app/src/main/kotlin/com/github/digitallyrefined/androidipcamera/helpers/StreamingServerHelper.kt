@@ -1766,7 +1766,7 @@ class StreamingServerHelper(
             id to map
         }
 
-        val currentCamera = prefs.getString("camera_id", null)?.substringBefore(':')
+        val currentCamera = prefs.getString("camera_id", null)
         val lgTarget = LgG6Main0Probe.isTarget(currentCamera)
         val debugEnabled = lgTarget && prefs.getBoolean("lg0_diagnostics", false)
         return DeviceInfo(
