@@ -1167,6 +1167,9 @@ class StreamingService : LifecycleService() {
         return when (pref) {
             "3840x2160" -> Size(3840, 2160)
             "4160x2340" -> Size(4160, 2340)
+            "4160x3120" -> Size(4160, 3120)
+            "4000x3000" -> Size(4000, 3000)
+            "3264x2448" -> Size(3264, 2448)
             "2560x1440" -> Size(2560, 1440)
             else -> output
         }
@@ -1201,7 +1204,9 @@ class StreamingService : LifecycleService() {
         val zoom = if (LgG6Main0Profile.isTarget(camId())) {
             if (lgMain0ZoomMode(p) == "gpu") lgMain0Zoom(p) else 1f
         } else originalZoom
+        val fill = LgG6Main0Profile.isTarget(camId()) && lgMain0ZoomMode(p) == "gpu"
         for (pipe in listOfNotNull(glPipe, cameraXGlPipe)) {
+            pipe.cropToFillOutput = fill
             pipe.roiZoom = zoom
             pipe.roiCenterX = x
             pipe.roiCenterY = y
@@ -1533,6 +1538,7 @@ class StreamingService : LifecycleService() {
                     val zoom = if (LgG6Main0Profile.isTarget(camId())) {
                         if (lgMain0ZoomMode(p) == "gpu") lgMain0Zoom(p) else 1f
                     } else originalZoom
+                    it.cropToFillOutput = LgG6Main0Profile.isTarget(camId()) && lgMain0ZoomMode(p) == "gpu"
                     it.roiZoom = zoom; it.roiCenterX = x; it.roiCenterY = y
                     it.start()
                     cameraXGlPipe = it
@@ -2260,7 +2266,7 @@ class StreamingService : LifecycleService() {
                         if (value == "gpu4") "gpu" else "isp")
                     .putString(LgG6Main0Profile.PREF_ZOOM, if (value == "safe") "1.0" else "4.0")
                     .putString("stream_res", "960x540")
-                    .putString("capture_resolution", if (value == "gpu4") "4160x2340" else "match")
+                    .putString("capture_resolution", if (value == "gpu4") "4160x3120" else "match")
                     .putString("stream_fps", "15")
                     .putString("stream_bitrate_kbps", "2000")
                     .putString("mjpeg_quality", "90")
@@ -2383,7 +2389,8 @@ class StreamingService : LifecycleService() {
                 }
             }
             "capture_resolution" -> {
-                if (value !in listOf("match", "2560x1440", "3840x2160", "4160x2340")) return
+                if (value !in listOf("match", "2560x1440", "3840x2160", "4160x2340",
+                        "4160x3120", "4000x3000", "3264x2448")) return
                 prefs.edit().putString("capture_resolution", value).apply()
                 if (localRecorder?.isRecording != true) debouncedStartCamera()
             }
