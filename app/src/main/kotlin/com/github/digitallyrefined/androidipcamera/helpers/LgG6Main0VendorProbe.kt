@@ -54,10 +54,16 @@ internal class LgG6Main0Telemetry : CameraCaptureSession.CaptureCallback() {
         @Volatile var lastUpdatedMs = 0L
             private set
         fun report(request: CaptureRequest, result: TotalCaptureResult, profile: String = "CameraX") {
-            val summary = "profile=$profile " +
-                LgG6PhotoPreviewTuning.readback(result) +
-                " requestISO=" + request.get(CaptureRequest.SENSOR_SENSITIVITY) +
-                " requestShutterNs=" + request.get(CaptureRequest.SENSOR_EXPOSURE_TIME) +
+            val aeMode = request.get(CaptureRequest.CONTROL_AE_MODE)
+            val aeOn = aeMode != CaptureRequest.CONTROL_AE_MODE_OFF
+            val requestedISO = request.get(CaptureRequest.SENSOR_SENSITIVITY)
+            val requestedShutter = request.get(CaptureRequest.SENSOR_EXPOSURE_TIME)
+            val summary = "profile=$profile AE=" + (if (aeOn) "AUTO" else "MANUAL") +
+                " aeState=" + result.get(CaptureResult.CONTROL_AE_STATE) +
+                " aeComp=" + request.get(CaptureRequest.CONTROL_AE_EXPOSURE_COMPENSATION) +
+                " " + LgG6PhotoPreviewTuning.readback(result) +
+                " requestISO=" + (if (aeOn) "ignored(template=$requestedISO)" else "$requestedISO") +
+                " requestShutterNs=" + (if (aeOn) "ignored(template=$requestedShutter)" else "$requestedShutter") +
                 " requestCrop=" + request.get(CaptureRequest.SCALER_CROP_REGION) +
                 " postRawBoost=" + result.get(CaptureResult.CONTROL_POST_RAW_SENSITIVITY_BOOST)
             lastSummary = summary
