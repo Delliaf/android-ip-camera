@@ -517,7 +517,29 @@ class OnvifServer(
             "GetDiscoveryMode" -> "<tds:GetDiscoveryModeResponse><tds:DiscoveryMode>Discoverable</tds:DiscoveryMode></tds:GetDiscoveryModeResponse>"
             "GetUsers" -> "<tds:GetUsersResponse>" + (creds()?.let { "<tds:User><tt:Username>${e(it.first)}</tt:Username><tt:UserLevel>Administrator</tt:UserLevel></tds:User>" } ?: "") + "</tds:GetUsersResponse>"
             "GetWsdlUrl" -> "<tds:GetWsdlUrlResponse><tds:WsdlUrl>http://www.onvif.org/</tds:WsdlUrl></tds:GetWsdlUrlResponse>"
-            "GetRelayOutputs" -> "<tds:GetRelayOutputsResponse/>"
+            "GetRelayOutputs" -> {
+                val st = cameraStatus()
+                "<tds:GetRelayOutputsResponse>" +
+                    (if (st.torchAvailable)
+                        "<tds:RelayOutputs token=\"torch0\"><tt:Properties><tt:Mode>Bistable</tt:Mode>" +
+                            "<tt:DelayTime>PT0S</tt:DelayTime><tt:IdleState>open</tt:IdleState>" +
+                            "</tt:Properties></tds:RelayOutputs>" else "") +
+                    "</tds:GetRelayOutputsResponse>"
+            }
+            "SetRelayOutputState" -> {
+                val st = cameraStatus()
+                if (!st.torchAvailable) return fault("ter:ActionNotSupported", "Torch not supported")
+                if (OnvifXml.text(op, "RelayOutputToken") != "torch0")
+                    return fault("ter:InvalidArgVal", "Unknown relay token")
+                val next = when (OnvifXml.text(op, "LogicalState")?.lowercase()) {
+                    "active" -> "on"
+                    "inactive" -> "off"
+                    else -> return fault("ter:InvalidArgVal", "Relay must be active/inactive")
+                }
+                if (!cameraControl("torch", next))
+                    fault("ter:Action", "Torch command refused")
+                else "<tds:SetRelayOutputStateResponse/>"
+            }
             "GetEndpointReference" -> "<tds:GetEndpointReferenceResponse><tds:GUID>${e(endpointUuid())}</tds:GUID></tds:GetEndpointReferenceResponse>"
             else -> null
         }
@@ -663,15 +685,67 @@ class OnvifServer(
         else -> null
     }
 
-    // ===================================================================== imaging (minimal)
+    // ===================================================================== imaging (LG Camera0, real focus)
 
-    private fun imaging(action: String): String? = when (action) {
-        "GetServiceCapabilities" -> "<timg:GetServiceCapabilitiesResponse><timg:Capabilities ImageStabilization=\"false\"/></timg:GetServiceCapabilitiesResponse>"
-        "GetImagingSettings" -> "<timg:GetImagingSettingsResponse><timg:ImagingSettings/></timg:GetImagingSettingsResponse>"
-        "GetOptions" -> "<timg:GetOptionsResponse><timg:ImagingOptions/></timg:GetOptionsResponse>"
-        "GetMoveOptions" -> "<timg:GetMoveOptionsResponse><timg:MoveOptions/></timg:GetMoveOptionsResponse>"
-        "GetStatus" -> "<timg:GetStatusResponse><timg:Status/></timg:GetStatusResponse>"
-        else -> null
+    private fun imaging(action: String, op: Element): String? {
+        val st = cameraStatus()
+        val focus = st.focusAvailable && st.maxFocusDiopters > 0f
+        val position = (st.focusDiopters / st.maxFocusDiopters.coerceAtLeast(0.01f))
+            .coerceIn(0f, 1f)
+        val mode = if (st.focusLocked) "MANUAL" else "AUTO"
+        return when (action) {
+            "GetServiceCapabilities" ->
+                "<timg:GetServiceCapabilitiesResponse><timg:Capabilities ImageStabilization=\"false\"/></timg:GetServiceCapabilitiesResponse>"
+            "GetImagingSettings" -> "<timg:GetImagingSettingsResponse><timg:ImagingSettings>" +
+                (if (focus) "<tt:Focus><tt:AutoFocusMode>$mode</tt:AutoFocusMode></tt:Focus>" else "") +
+                "</timg:ImagingSettings></timg:GetImagingSettingsResponse>"
+            "GetOptions" -> "<timg:GetOptionsResponse><timg:ImagingOptions>" +
+                (if (focus) "<tt:Focus><tt:AutoFocusModes>AUTO</tt:AutoFocusModes>" +
+                    "<tt:AutoFocusModes>MANUAL</tt:AutoFocusModes></tt:Focus>" else "") +
+                "</timg:ImagingOptions></timg:GetOptionsResponse>"
+            "GetMoveOptions" -> "<timg:GetMoveOptionsResponse><timg:MoveOptions>" +
+                (if (focus) "<tt:Absolute><tt:Position><tt:Min>0.0</tt:Min>" +
+                    "<tt:Max>1.0</tt:Max></tt:Position></tt:Absolute>" else "") +
+                "</timg:MoveOptions></timg:GetMoveOptionsResponse>"
+            "GetStatus" -> "<timg:GetStatusResponse><timg:Status>" +
+                (if (focus) "<tt:FocusStatus20><tt:Position>$position</tt:Position>" +
+                    "<tt:MoveStatus>IDLE</tt:MoveStatus></tt:FocusStatus20>" else "") +
+                "</timg:Status></timg:GetStatusResponse>"
+            "SetImagingSettings" -> {
+                if (!focus) return fault("ter:ActionNotSupported", "Focus control unavailable")
+                if (OnvifXml.text(op, "VideoSourceToken") !in listOf(null, "vs0"))
+                    return fault("ter:InvalidArgVal", "Unknown VideoSourceToken")
+                val requested = OnvifXml.text(op, "AutoFocusMode")
+                    ?: return fault("ter:InvalidArgVal", "Only focus mode is supported")
+                val ok = when (requested.uppercase()) {
+                    "AUTO" -> cameraControl("lg_main0_focus_mode", "auto")
+                    "MANUAL" -> cameraControl("lg_main0_focus_mode", "diopters")
+                    else -> return fault("ter:InvalidArgVal", "Unsupported focus mode")
+                }
+                if (!ok) fault("ter:Action", "Unable to apply focus mode")
+                else "<timg:SetImagingSettingsResponse/>"
+            }
+            "Move" -> {
+                if (!focus) return fault("ter:ActionNotSupported", "Focus control unavailable")
+                if (OnvifXml.text(op, "VideoSourceToken") !in listOf(null, "vs0"))
+                    return fault("ter:InvalidArgVal", "Unknown VideoSourceToken")
+                val absolute = OnvifXml.find(op, "Absolute")
+                    ?: return fault("ter:ActionNotSupported", "Only absolute focus is supported")
+                val p = OnvifXml.text(absolute, "Position")?.toFloatOrNull()
+                    ?.takeIf { it.isFinite() && it in 0f..1f }
+                    ?: return fault("ter:InvalidArgVal", "Focus position must be 0..1")
+                val selectedDiopters = (p * st.maxFocusDiopters).coerceIn(0f, st.maxFocusDiopters)
+                if (!cameraControl("lg_main0_focus_mode", "diopters") ||
+                    !cameraControl("lg_main0_focus_diopters", selectedDiopters.toString()))
+                    return fault("ter:Action", "Unable to lock absolute focus")
+                "<timg:MoveResponse/>"
+            }
+            "Stop" -> {
+                if (!focus) fault("ter:ActionNotSupported", "Focus not available")
+                else "<timg:StopResponse/>" // Absolute focus sets lens once, no ongoing movement.
+            }
+            else -> null
+        }
     }
 
     // ===================================================================== events
