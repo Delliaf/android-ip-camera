@@ -24,6 +24,8 @@ internal object OnvifNs {
     const val WSNT = "http://docs.oasis-open.org/wsn/b-2"
     const val WSA = "http://www.w3.org/2005/08/addressing"
     const val TNS1 = "http://www.onvif.org/ver10/topics"
+    /** Private namespace; NOT a standardized Profile M/ONVIF health schema. */
+    const val APP_HEALTH = "urn:android-ip-camera:device-health:1"
     const val WSTOP = "http://docs.oasis-open.org/wsn/t-1"
     const val TER = "http://www.onvif.org/ver10/error"
     const val WSSE = "http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd"
@@ -33,7 +35,7 @@ internal object OnvifNs {
     val DECLS: String = listOf(
         "s" to SOAP, "tds" to TDS, "trt" to TRT, "tr2" to TR2, "tt" to TT, "tev" to TEV,
         "timg" to TIMG, "wsnt" to WSNT, "wsa" to WSA, "tns1" to TNS1, "wstop" to WSTOP, "ter" to TER,
-        "xs" to "http://www.w3.org/2001/XMLSchema"
+        "xs" to "http://www.w3.org/2001/XMLSchema", "apph" to APP_HEALTH
     ).joinToString(" ") { (p, u) -> "xmlns:$p=\"$u\"" }
 }
 
