@@ -899,7 +899,7 @@ class StreamingService : LifecycleService() {
                     focusDiopters = st.getString(LgG6Main0Profile.PREF_FOCUS_DIOPTERS, "0.25")
                         ?.toFloatOrNull()?.coerceIn(0f, maxDiopters) ?: 0.25f,
                     maxFocusDiopters = maxDiopters,
-                    torchAvailable = anyBackCameraWithFlash(),
+                    torchAvailable = flashAnchorCameraId() != null,
                     torchEnabled = st.getString(PREF_CAMERA_TORCH, "off") == "on",
                     batteryPercent = battery,
                     batteryCelsius = perf.batteryTemperatureCelsius,
