@@ -110,6 +110,7 @@ class OnvifServer(
     private class Subscription(val id: String, @Volatile var expiresAt: Long) {
         val queue = ArrayDeque<String>()
         val lock = Object()
+        @Volatile var lastHealthAtMs: Long = 0L
     }
 
     @Volatile private var serverSocket: ServerSocket? = null
@@ -850,7 +851,15 @@ class OnvifServer(
         "<tns1:VideoSource wstop:topic=\"false\"><tns1:MotionAlarm wstop:topic=\"true\">" +
         messageDescription(listOf("Source" to "tt:ReferenceToken"), "State" to "xs:boolean") +
         "</tns1:MotionAlarm></tns1:VideoSource>" +
-        "</wstop:TopicSet>" +
+        "<apph:DeviceHealth wstop:topic=\"false\">" +
+        listOf("BatteryPercent" to "xs:int", "BatteryTemperatureC" to "xs:float",
+            "SoCTemperatureC" to "xs:float", "CpuPercent" to "xs:int")
+            .joinToString("") { (name, type) ->
+                "<apph:$name wstop:topic=\"true\">" +
+                    messageDescription(listOf("Source" to "xs:string"), "Value" to type) +
+                    "</apph:$name>"
+            } +
+        "</apph:DeviceHealth></wstop:TopicSet>" +
         "<wsnt:TopicExpressionDialect>$TOPIC_DIALECT</wsnt:TopicExpressionDialect>" +
         "<wsnt:TopicExpressionDialect>http://docs.oasis-open.org/wsnt/t-1/TopicExpression/ConcreteSet</wsnt:TopicExpressionDialect>" +
         "<tev:MessageContentFilterDialect>http://www.onvif.org/ver10/tev/messageContentFilter/ItemFilter</tev:MessageContentFilterDialect>" +
@@ -874,6 +883,26 @@ class OnvifServer(
             ),
             notificationMessage(TOPIC_ALARM, utc, op, listOf("Source" to "vs0"), "State" to active.toString())
         )
+    }
+
+    /**
+     * Vendor ONVIF PullPoint property events. ONVIF Profile S does not define
+     * generic battery, SoC or CPU attributes, so these are explicitly namespaced.
+     * Clients that ignore vendor topics still receive standard motion events.
+     */
+    private fun healthMessages(now: Long): List<String> {
+        val st = cameraStatus()
+        val utc = OnvifXml.isoUtc(now)
+        val values = listOfNotNull(
+            st.batteryPercent?.coerceIn(0, 100)?.let { "BatteryPercent" to it.toString() },
+            st.batteryCelsius?.takeIf { it.isFinite() }?.let { "BatteryTemperatureC" to it.toString() },
+            st.socCelsius?.takeIf { it.isFinite() }?.let { "SoCTemperatureC" to it.toString() },
+            st.cpuPercent?.takeIf { it >= 0 }?.let { "CpuPercent" to it.toString() }
+        )
+        return values.map { (name, value) ->
+            notificationMessage("apph:DeviceHealth/$name", utc, "Changed",
+                listOf("Source" to "LG-H872"), "Value" to value)
+        }
     }
 
     private fun enqueue(s: Subscription, msgs: List<String>) {
@@ -912,7 +941,8 @@ class OnvifServer(
                 }
                 val sub = Subscription(OnvifXml.randomHex(8), term.coerceAtLeast(now + 10_000))
                 subscriptions[sub.id] = sub
-                enqueue(sub, motionMessages(motion, "Initialized", now))
+                enqueue(sub, motionMessages(motion, "Initialized", now) + healthMessages(now))
+                sub.lastHealthAtMs = now
                 onLog("ONVIF pull-point subscription ${sub.id} created")
                 "<tev:CreatePullPointSubscriptionResponse><tev:SubscriptionReference>" +
                     "<wsa:Address>${baseUrl()}/onvif/pullpoint/${sub.id}</wsa:Address></tev:SubscriptionReference>" +
@@ -924,6 +954,10 @@ class OnvifServer(
                 val timeout = (OnvifXml.text(op, "Timeout")?.let { OnvifXml.parseDuration(it) } ?: 10_000L).coerceIn(0L, MAX_PULL_WAIT_MS)
                 val limit = (OnvifXml.text(op, "MessageLimit")?.toIntOrNull() ?: 100).coerceAtLeast(1)
                 val deadline = now + timeout
+                if (now - sub.lastHealthAtMs >= 10_000L) {
+                    enqueue(sub, healthMessages(now))
+                    sub.lastHealthAtMs = now
+                }
                 val msgs = ArrayList<String>()
                 synchronized(sub.lock) {
                     while (sub.queue.isEmpty() && !stopped && subscriptions.containsKey(sub.id)) {
@@ -945,8 +979,13 @@ class OnvifServer(
             }
             "SetSynchronizationPoint" -> {
                 val sub = subscriptionFor(path, header)
-                if (sub != null) enqueue(sub, motionMessages(motion, "Initialized", now))
-                else subscriptions.values.forEach { enqueue(it, motionMessages(motion, "Initialized", now)) }
+                if (sub != null) {
+                    enqueue(sub, motionMessages(motion, "Initialized", now) + healthMessages(now))
+                    sub.lastHealthAtMs = now
+                } else subscriptions.values.forEach {
+                    enqueue(it, motionMessages(motion, "Initialized", now) + healthMessages(now))
+                    it.lastHealthAtMs = now
+                }
                 "<tev:SetSynchronizationPointResponse/>"
             }
             "Seek" -> fault("ter:ActionNotSupported", "Seek not supported")
