@@ -9,6 +9,7 @@ on:
       - fix/lg-g6-metrics-visible
       - fix/web-controls-battery-temp-20261120
       - fix/lg-g6-noise-edge-sharpness-20261120
+      - fix/lg-g6-focus-onvif-lifecycle-20261120
     paths-ignore:
       - 'DEVELOPMENT_HISTORY.txt'
       - 'AGENTS.md'
