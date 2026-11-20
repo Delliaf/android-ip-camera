@@ -746,8 +746,13 @@ class StreamingService : LifecycleService() {
                     streamingEnabled = { streamingServerHelper?.isStreamingEnabled() != false }
                 ),
                 DeviceMemoryHelper.rtspSendQueueCapacity(this),
-                // Same certificate as the web server; null when TLS is disabled.
-                tls = { TlsHelper.serverConfig(this) }
+                // RTSP TLS is independent of Web HTTPS/ONVIF transport.
+                // Plain rtsp:// is the compatible default for LAN NVR/go2rtc.
+                tls = {
+                    if (PreferenceManager.getDefaultSharedPreferences(this)
+                            .getBoolean("rtsp_tls_enabled", false))
+                        TlsHelper.serverConfig(this) else null
+                }
             )
             h264StreamingEncoder?.rtspServer = rtspServer
         }
@@ -808,6 +813,11 @@ class StreamingService : LifecycleService() {
         }
         if (onvifServer != null) return
         val rtspPort = prefPort(RtspServer.PREF_PORT, RtspServer.DEFAULT_PORT)
+        if (prefs.getBoolean("onvif_auth_enabled", false) && savedOnvifCredentials() == null) {
+            Log.e(TAG, "ONVIF authentication requested but no valid stored credentials; refusing to start an open ONVIF listener")
+            onLog?.invoke("ONVIF not started: configure username/password first or disable ONVIF authentication")
+            return
+        }
         val version = try { packageManager.getPackageInfo(packageName, 0).versionName ?: "" } catch (_: Exception) { "" }
         val onvif = OnvifServer(
             port = prefPort(PREF_ONVIF_PORT, 8000),
@@ -826,26 +836,27 @@ class StreamingService : LifecycleService() {
             stream = {
                 val size = desiredSize()
                 val fps = (prefs.getString("stream_fps", "30")?.toIntOrNull() ?: 30).coerceIn(1, 60)
-                val scheme = if (TlsHelper.isEnabled(this)) "rtsps" else "rtsp"
+                val scheme = if (prefs.getBoolean("rtsp_tls_enabled", false)) "rtsps" else "rtsp"
                 OnvifStreamInfo(
                     rtspUrl = "$scheme://${getLocalIpAddress()}:$rtspPort${RtspServer.PATH}",
                     width = size.width, height = size.height, fps = fps,
                     bitrateKbps = H264HardwareEncoder.bitrateFor(size.width, size.height, mainBitrateKbps()) / 1000,
                 )
             },
-            credentials = { streamCredentials() },
+            // ONVIF credentials are opt-in and INDEPENDENT of the Web/RTSP
+            // authentication toggle. Plain HTTP ONVIF is LAN-only by default.
+            credentials = {
+                if (prefs.getBoolean("onvif_auth_enabled", false))
+                    savedOnvifCredentials() else null
+            },
             // Snapshots use the regular still-capture path, so they work whether or not a
             // stream is running (a snapshot opens the camera on demand and restores the stream).
             snapshot = { snapshot(camId()) },
             onLog = { Log.i(TAG, "ONVIF: $it"); onLog?.invoke("ONVIF: $it") },
-            // Independent ONVIF transport setting: keep HTTPS as the default
-            // for existing installations; allow explicit LAN HTTP for go2rtc's
-            // onvif:// protocol without disabling web/RTSPS encryption.
-            tls = {
-                if (prefs.getBoolean("onvif_tls_enabled", true))
-                    TlsHelper.serverConfig(this)
-                else null
-            },
+            // Standard ONVIF SOAP/WS-Discovery on plain HTTP; legacy saved
+            // onvif_tls_enabled=true is intentionally ignored. Web HTTPS and
+            // opt-in RTSPS have their own transport and authentication.
+            tls = { null },
             bindAddress = ListenInterface.resolve(this)
         )
         try {
@@ -869,6 +880,15 @@ class StreamingService : LifecycleService() {
                 multicastLock = null
             }
         }
+    }
+
+    private fun savedOnvifCredentials(): Pair<String, String>? {
+        val storage = SecureStorage(this)
+        val user = InputValidator.validateAndSanitizeUsername(
+            storage.getSecureString(SecureStorage.KEY_USERNAME, "") ?: "")
+        val password = InputValidator.validateAndSanitizePassword(
+            storage.getSecureString(SecureStorage.KEY_PASSWORD, "") ?: "")
+        return if (user.isNullOrBlank() || password.isNullOrBlank()) null else user to password
     }
 
     private fun streamCredentials(): Pair<String, String>? {
