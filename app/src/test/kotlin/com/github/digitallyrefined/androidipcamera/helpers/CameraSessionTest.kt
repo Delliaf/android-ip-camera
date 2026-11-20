@@ -22,6 +22,20 @@ class CameraSessionTest {
     private val motion = CameraDemand(motion = true)
 
     @Test
+    fun `pinned headless H264 camera keeps serving screen lock and viewer reconnect`() {
+        // LG H872 virtual H264 demand remains true even with no real viewer.
+        // PreviewView attach/detach must not rebind or change autofocus policy.
+        val awake = CameraDemand(h264Viewers = true, preview = true)
+        val locked = CameraDemand(h264Viewers = true, preview = false)
+        assertFalse(awake.screenPreview)
+        assertFalse(locked.screenPreview)
+        assertTrue(awake.h264 && locked.h264)
+        assertTrue(cameraX(awake, true).serves(locked, fps, back))
+        assertTrue(cameraX(locked, true).serves(awake, fps, back))
+        assertTrue(cameraX(locked, true).serves(locked, fps, back))
+    }
+
+    @Test
     fun `the same viewers are served without a restart`() {
         // A VLC reconnect or a second RTSP client: H.264 viewers before and after.
         for (session in allBackends) {
