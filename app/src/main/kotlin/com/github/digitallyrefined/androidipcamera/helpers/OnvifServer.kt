@@ -35,7 +35,26 @@ data class OnvifStreamInfo(
     val width: Int,
     val height: Int,
     val fps: Int,
-    val bitrateKbps: Int
+    val bitrateKbps: Int,
+    val quality: Int = 5,
+    val subWidth: Int = width,
+    val subHeight: Int = height,
+    val subFps: Int = fps,
+    val subBitrateKbps: Int = bitrateKbps,
+    val subRtspUrl: String = rtspUrl,
+)
+
+data class OnvifControlStatus(
+    val focusAvailable: Boolean = false,
+    val focusLocked: Boolean = false,
+    val focusDiopters: Float = 0f,
+    val maxFocusDiopters: Float = 10f,
+    val torchAvailable: Boolean = false,
+    val torchEnabled: Boolean = false,
+    val batteryPercent: Int? = null,
+    val batteryCelsius: Double? = null,
+    val socCelsius: Double? = null,
+    val cpuPercent: Int? = null,
 )
 
 /**
@@ -50,6 +69,9 @@ class OnvifServer(
     private val stream: () -> OnvifStreamInfo,
     private val credentials: () -> Pair<String, String>?,
     private val snapshot: (() -> ByteArray?)? = null,
+    /** Status and command adapters owned by the Android foreground service. */
+    private val cameraStatus: () -> OnvifControlStatus = { OnvifControlStatus() },
+    private val cameraControl: (String, String) -> Boolean = { _, _ -> false },
     private val onLog: (String) -> Unit = {},
     private val discoveryPort: Int = 3702,
     private val enableDiscovery: Boolean = true,
@@ -88,6 +110,7 @@ class OnvifServer(
     private class Subscription(val id: String, @Volatile var expiresAt: Long) {
         val queue = ArrayDeque<String>()
         val lock = Object()
+        @Volatile var lastHealthAtMs: Long = 0L
     }
 
     @Volatile private var serverSocket: ServerSocket? = null
@@ -190,6 +213,14 @@ class OnvifServer(
         remoteHost.set(sock.inetAddress?.hostAddress ?: "?")
         openSockets += sock
         try {
+            // Anonymous ONVIF exposes camera controls; LAN only, even if
+            // the device is on a public interface or a port is forwarded.
+            val address = sock.inetAddress
+            if (credentials() == null && !address.isLoopbackAddress &&
+                !address.isSiteLocalAddress && !address.isLinkLocalAddress) {
+                onLog("SECURITY: blocked anonymous ONVIF client outside LAN")
+                return
+            }
             sock.soTimeout = 30_000
             sock.tcpNoDelay = true
             val input = BufferedInputStream(sock.getInputStream())
@@ -317,7 +348,7 @@ class OnvifServer(
             OnvifNs.TR2 -> media2(action, op)
             OnvifNs.TEV -> events(action, op, path, header)
             OnvifNs.WSNT -> notification(action, op, path, header)
-            OnvifNs.TIMG -> imaging(action)
+            OnvifNs.TIMG -> imaging(action, op)
             else -> null
         }
         if (result != null && result.startsWith("FAULT:")) {
@@ -453,6 +484,8 @@ class OnvifServer(
                 "<tt:Network><tt:IPFilter>false</tt:IPFilter><tt:ZeroConfiguration>false</tt:ZeroConfiguration><tt:IPVersion6>false</tt:IPVersion6><tt:DynDNS>false</tt:DynDNS></tt:Network>" +
                 "<tt:System><tt:DiscoveryResolve>false</tt:DiscoveryResolve><tt:DiscoveryBye>true</tt:DiscoveryBye><tt:RemoteDiscovery>false</tt:RemoteDiscovery><tt:SystemBackup>false</tt:SystemBackup><tt:SystemLogging>false</tt:SystemLogging><tt:FirmwareUpgrade>false</tt:FirmwareUpgrade>" +
                 "<tt:SupportedVersions><tt:Major>2</tt:Major><tt:Minor>60</tt:Minor></tt:SupportedVersions></tt:System>" +
+                "<tt:IO><tt:InputConnectors>0</tt:InputConnectors>" +
+                "<tt:RelayOutputs>${if (cameraStatus().torchAvailable) 1 else 0}</tt:RelayOutputs></tt:IO>" +
                 "<tt:Security><tt:TLS1.1>false</tt:TLS1.1><tt:TLS1.2>$secure</tt:TLS1.2><tt:OnboardKeyGeneration>false</tt:OnboardKeyGeneration><tt:AccessPolicyConfig>false</tt:AccessPolicyConfig><tt:X.509Token>false</tt:X.509Token><tt:SAMLToken>false</tt:SAMLToken><tt:KerberosToken>false</tt:KerberosToken><tt:RELToken>false</tt:RELToken></tt:Security>" +
                 "</tt:Device>" +
                 "<tt:Events><tt:XAddr>$b/onvif/events_service</tt:XAddr><tt:WSSubscriptionPolicySupport>false</tt:WSSubscriptionPolicySupport><tt:WSPullPointSupport>true</tt:WSPullPointSupport><tt:WSPausableSubscriptionManagerInterfaceSupport>false</tt:WSPausableSubscriptionManagerInterfaceSupport></tt:Events>" +
@@ -495,7 +528,29 @@ class OnvifServer(
             "GetDiscoveryMode" -> "<tds:GetDiscoveryModeResponse><tds:DiscoveryMode>Discoverable</tds:DiscoveryMode></tds:GetDiscoveryModeResponse>"
             "GetUsers" -> "<tds:GetUsersResponse>" + (creds()?.let { "<tds:User><tt:Username>${e(it.first)}</tt:Username><tt:UserLevel>Administrator</tt:UserLevel></tds:User>" } ?: "") + "</tds:GetUsersResponse>"
             "GetWsdlUrl" -> "<tds:GetWsdlUrlResponse><tds:WsdlUrl>http://www.onvif.org/</tds:WsdlUrl></tds:GetWsdlUrlResponse>"
-            "GetRelayOutputs" -> "<tds:GetRelayOutputsResponse/>"
+            "GetRelayOutputs" -> {
+                val st = cameraStatus()
+                "<tds:GetRelayOutputsResponse>" +
+                    (if (st.torchAvailable)
+                        "<tds:RelayOutputs token=\"torch0\"><tt:Properties><tt:Mode>Bistable</tt:Mode>" +
+                            "<tt:DelayTime>PT0S</tt:DelayTime><tt:IdleState>open</tt:IdleState>" +
+                            "</tt:Properties></tds:RelayOutputs>" else "") +
+                    "</tds:GetRelayOutputsResponse>"
+            }
+            "SetRelayOutputState" -> {
+                val st = cameraStatus()
+                if (!st.torchAvailable) return fault("ter:ActionNotSupported", "Torch not supported")
+                if (OnvifXml.text(op, "RelayOutputToken") != "torch0")
+                    return fault("ter:InvalidArgVal", "Unknown relay token")
+                val next = when (OnvifXml.text(op, "LogicalState")?.lowercase()) {
+                    "active" -> "on"
+                    "inactive" -> "off"
+                    else -> return fault("ter:InvalidArgVal", "Relay must be active/inactive")
+                }
+                if (!cameraControl("torch", next))
+                    fault("ter:Action", "Torch command refused")
+                else "<tds:SetRelayOutputStateResponse/>"
+            }
             "GetEndpointReference" -> "<tds:GetEndpointReferenceResponse><tds:GUID>${e(endpointUuid())}</tds:GUID></tds:GetEndpointReferenceResponse>"
             else -> null
         }
@@ -523,10 +578,15 @@ class OnvifServer(
 
     private fun videoEncoderConfig(token: String, tag: String = "tt:VideoEncoderConfiguration"): String {
         val s = stream()
-        val fps = s.fps.coerceAtLeast(1)
+        val sub = token == "sub"
+        val fps = (if (sub) s.subFps else s.fps).coerceAtLeast(1)
+        val width = if (sub) s.subWidth else s.width
+        val height = if (sub) s.subHeight else s.height
+        val bitrate = if (sub) s.subBitrateKbps else s.bitrateKbps
+        val quality = if (sub) 5 else s.quality
         return "<$tag token=\"vec_$token\"><tt:Name>${if (token == "main") "MainStream" else "SubStream"}</tt:Name><tt:UseCount>1</tt:UseCount>" +
-            "<tt:Encoding>H264</tt:Encoding><tt:Resolution><tt:Width>${s.width}</tt:Width><tt:Height>${s.height}</tt:Height></tt:Resolution>" +
-            "<tt:Quality>5</tt:Quality><tt:RateControl><tt:FrameRateLimit>$fps</tt:FrameRateLimit><tt:EncodingInterval>1</tt:EncodingInterval><tt:BitrateLimit>${s.bitrateKbps}</tt:BitrateLimit></tt:RateControl>" +
+            "<tt:Encoding>H264</tt:Encoding><tt:Resolution><tt:Width>$width</tt:Width><tt:Height>$height</tt:Height></tt:Resolution>" +
+            "<tt:Quality>$quality</tt:Quality><tt:RateControl><tt:FrameRateLimit>$fps</tt:FrameRateLimit><tt:EncodingInterval>1</tt:EncodingInterval><tt:BitrateLimit>$bitrate</tt:BitrateLimit></tt:RateControl>" +
             "<tt:H264><tt:GovLength>${fps}</tt:GovLength><tt:H264Profile>Main</tt:H264Profile></tt:H264>" +
             "<tt:Multicast><tt:Address><tt:Type>IPv4</tt:Type><tt:IPv4Address>0.0.0.0</tt:IPv4Address></tt:Address><tt:Port>0</tt:Port><tt:TTL>1</tt:TTL><tt:AutoStart>false</tt:AutoStart></tt:Multicast>" +
             "<tt:SessionTimeout>PT60S</tt:SessionTimeout></$tag>"
@@ -536,11 +596,74 @@ class OnvifServer(
         "<$tag token=\"$token\" fixed=\"true\"><tt:Name>${if (token == "main") "MainStream" else "SubStream"}</tt:Name>" +
             videoSourceConfig() + videoEncoderConfig(token) + "</$tag>"
 
+    /**
+     * ONVIF Media/Media2 video configuration, with real forwarding to the
+     * shared RTSP encoder. No fake success for unsupported codec/resolution.
+     * The substream is a separate encoder; its supported sizes/bitrates are
+     * intentionally constrained to values accepted by our RTSP implementation.
+     */
+    private fun setEncoderConfiguration(op: Element): String? {
+        val config = OnvifXml.find(op, "Configuration")
+            ?: return fault("ter:InvalidArgVal", "Missing video encoder Configuration")
+        val token = config.getAttribute("token").ifBlank {
+            OnvifXml.text(op, "ConfigurationToken") ?: "vec_main"
+        }.removePrefix("vec_")
+        if (token !in profileTokens()) return fault("ter:InvalidArgVal", "Unknown encoder $token")
+        val current = stream()
+        val sub = token == "sub"
+        val oldWidth = if (sub) current.subWidth else current.width
+        val oldHeight = if (sub) current.subHeight else current.height
+        val oldFps = if (sub) current.subFps else current.fps
+        val oldBitrate = if (sub) current.subBitrateKbps else current.bitrateKbps
+        val encoding = OnvifXml.text(config, "Encoding")
+        if (encoding != null && encoding.uppercase() != "H264")
+            return fault("ter:ActionNotSupported", "Only H264 is supported")
+        val width = OnvifXml.text(config, "Width")?.toIntOrNull() ?: oldWidth
+        val height = OnvifXml.text(config, "Height")?.toIntOrNull() ?: oldHeight
+        if (width != oldWidth || height != oldHeight)
+            return fault("ter:ActionNotSupported",
+                "Changing resolution from ONVIF is not supported; choose RTSP resolution in web controls")
+        val fpsText = OnvifXml.text(config, "FrameRateLimit")
+        val bitrateText = OnvifXml.text(config, "BitrateLimit")
+        val qualityText = OnvifXml.text(config, "Quality")
+        val fps = fpsText?.toIntOrNull() ?: oldFps
+        val bitrate = bitrateText?.toIntOrNull() ?: oldBitrate
+        val quality = qualityText?.toFloatOrNull() ?: current.quality.toFloat()
+        if (fps !in 1..60 || bitrate !in 250..80_000 ||
+            !quality.isFinite() || quality !in 1f..5f)
+            return fault("ter:InvalidArgVal", "Invalid encoder fps/bitrate/quality")
+        if (sub) {
+            if (fps !in listOf(10, 15, 20, 30) || bitrate !in listOf(300, 500, 800, 1200, 2000))
+                return fault("ter:ActionNotSupported",
+                    "Substream supports FPS 10/15/20/30 and bitrate 300/500/800/1200/2000 kbps")
+            if (fpsText != null && !cameraControl("rtsp_sub_fps", fps.toString()))
+                return fault("ter:Action", "Could not set substream FPS")
+            if (bitrateText != null && !cameraControl("rtsp_sub_bitrate", bitrate.toString()))
+                return fault("ter:Action", "Could not set substream bitrate")
+            if (qualityText != null && bitrateText == null) {
+                val preset = listOf(300, 500, 800, 1200, 2000)[quality.toInt().coerceIn(1, 5) - 1]
+                if (!cameraControl("rtsp_sub_bitrate", preset.toString()))
+                    return fault("ter:Action", "Could not set substream quality")
+            }
+        } else {
+            // Apply quality first, explicit bitrate wins when both are supplied.
+            if (qualityText != null && !cameraControl("onvif_video_quality",
+                    quality.toInt().coerceIn(1, 5).toString()))
+                return fault("ter:Action", "Could not set video quality")
+            if (fpsText != null && !cameraControl("fps", fps.toString()))
+                return fault("ter:Action", "Could not set video FPS")
+            if (bitrateText != null && !cameraControl("stream_bitrate_kbps", bitrate.toString()))
+                return fault("ter:Action", "Could not set video bitrate")
+        }
+        return null // accepted and dispatched to service; camera encoder restarts asynchronously.
+    }
+
     private fun profileToken(op: Element): String? = OnvifXml.text(op, "ProfileToken")
 
-    private fun streamUri(): String {
-        val url = stream().rtspUrl
-        return if (secure) url.replaceFirst("rtsp://", "rtsps://") else url
+    private fun streamUri(token: String = "main"): String {
+        // ONVIF HTTP/HTTPS transport has NOTHING to do with RTSP/RTSPS.
+        val s = stream()
+        return if (token == "sub") s.subRtspUrl else s.rtspUrl
     }
 
     private fun media(action: String, op: Element): String? {
@@ -564,15 +687,31 @@ class OnvifServer(
                 val t = OnvifXml.text(op, "ConfigurationToken")?.removePrefix("vec_") ?: "main"
                 "<trt:GetVideoEncoderConfigurationResponse>${videoEncoderConfig(if (t in profileTokens()) t else "main", "trt:Configuration")}</trt:GetVideoEncoderConfigurationResponse>"
             }
-            "GetVideoEncoderConfigurationOptions" -> "<trt:GetVideoEncoderConfigurationOptionsResponse><trt:Options>" +
-                "<tt:QualityRange><tt:Min>1</tt:Min><tt:Max>5</tt:Max></tt:QualityRange>" +
-                "<tt:H264><tt:ResolutionsAvailable><tt:Width>${s.width}</tt:Width><tt:Height>${s.height}</tt:Height></tt:ResolutionsAvailable>" +
-                "<tt:GovLengthRange><tt:Min>1</tt:Min><tt:Max>300</tt:Max></tt:GovLengthRange><tt:FrameRateRange><tt:Min>1</tt:Min><tt:Max>${s.fps.coerceAtLeast(1)}</tt:Max></tt:FrameRateRange>" +
-                "<tt:EncodingIntervalRange><tt:Min>1</tt:Min><tt:Max>1</tt:Max></tt:EncodingIntervalRange><tt:H264ProfilesSupported>Main</tt:H264ProfilesSupported></tt:H264>" +
-                "</trt:Options></trt:GetVideoEncoderConfigurationOptionsResponse>"
-            "SetVideoEncoderConfiguration" -> "<trt:SetVideoEncoderConfigurationResponse/>"
+            "GetVideoEncoderConfigurationOptions" -> {
+                val selected = OnvifXml.text(op, "ConfigurationToken")?.removePrefix("vec_") ?: "main"
+                if (selected !in profileTokens()) return fault("ter:InvalidArgVal", "Unknown encoder token")
+                val sub = selected == "sub"
+                val width = if (sub) s.subWidth else s.width
+                val height = if (sub) s.subHeight else s.height
+                val rangeMin = if (sub) 300 else 250
+                val rangeMax = if (sub) 2000 else 80000
+                val upperFps = if (sub) 30 else 60
+                "<trt:GetVideoEncoderConfigurationOptionsResponse><trt:Options>" +
+                    "<tt:QualityRange><tt:Min>1</tt:Min><tt:Max>5</tt:Max></tt:QualityRange>" +
+                    "<tt:H264><tt:ResolutionsAvailable><tt:Width>$width</tt:Width><tt:Height>$height</tt:Height></tt:ResolutionsAvailable>" +
+                    "<tt:GovLengthRange><tt:Min>1</tt:Min><tt:Max>300</tt:Max></tt:GovLengthRange>" +
+                    "<tt:FrameRateRange><tt:Min>1</tt:Min><tt:Max>$upperFps</tt:Max></tt:FrameRateRange>" +
+                    "<tt:BitrateRange><tt:Min>$rangeMin</tt:Min><tt:Max>$rangeMax</tt:Max></tt:BitrateRange>" +
+                    "<tt:EncodingIntervalRange><tt:Min>1</tt:Min><tt:Max>1</tt:Max></tt:EncodingIntervalRange>" +
+                    "<tt:H264ProfilesSupported>Main</tt:H264ProfilesSupported></tt:H264>" +
+                    "</trt:Options></trt:GetVideoEncoderConfigurationOptionsResponse>"
+            }
+            "SetVideoEncoderConfiguration" -> {
+                setEncoderConfiguration(op)?.let { return it }
+                "<trt:SetVideoEncoderConfigurationResponse/>"
+            }
             "GetGuaranteedNumberOfVideoEncoderInstances" -> "<trt:GetGuaranteedNumberOfVideoEncoderInstancesResponse><trt:TotalNumber>2</trt:TotalNumber><trt:H264>2</trt:H264></trt:GetGuaranteedNumberOfVideoEncoderInstancesResponse>"
-            "GetStreamUri" -> "<trt:GetStreamUriResponse><trt:MediaUri><tt:Uri>${e(streamUri())}</tt:Uri>" +
+            "GetStreamUri" -> "<trt:GetStreamUriResponse><trt:MediaUri><tt:Uri>${e(streamUri(profileToken(op) ?: "main"))}</tt:Uri>" +
                 "<tt:InvalidAfterConnect>false</tt:InvalidAfterConnect><tt:InvalidAfterReboot>false</tt:InvalidAfterReboot><tt:Timeout>PT0S</tt:Timeout></trt:MediaUri></trt:GetStreamUriResponse>"
             "GetSnapshotUri" -> if (snapshot == null) fault("ter:ActionNotSupported", "No snapshot") else
                 "<trt:GetSnapshotUriResponse><trt:MediaUri><tt:Uri>${e(baseUrl())}/onvif/snapshot.jpg</tt:Uri>" +
@@ -599,13 +738,20 @@ class OnvifServer(
 
     private fun media2EncoderConfig(token: String, tag: String): String {
         val s = stream()
-        return "<$tag token=\"vec_$token\" GovLength=\"${s.fps.coerceAtLeast(1)}\" Profile=\"Main\"><tt:Name>${if (token == "main") "MainStream" else "SubStream"}</tt:Name><tt:UseCount>1</tt:UseCount>" +
-            "<tt:Encoding>H264</tt:Encoding><tt:Resolution><tt:Width>${s.width}</tt:Width><tt:Height>${s.height}</tt:Height></tt:Resolution>" +
-            "<tt:RateControl ConstantBitRate=\"false\"><tt:FrameRateLimit>${s.fps}</tt:FrameRateLimit><tt:BitrateLimit>${s.bitrateKbps}</tt:BitrateLimit></tt:RateControl>" +
-            "<tt:Quality>5</tt:Quality></$tag>"
+        val sub = token == "sub"
+        val fps = if (sub) s.subFps else s.fps
+        val bitrate = if (sub) s.subBitrateKbps else s.bitrateKbps
+        val width = if (sub) s.subWidth else s.width
+        val height = if (sub) s.subHeight else s.height
+        val quality = if (sub) 5 else s.quality
+        return "<$tag token=\"vec_$token\" GovLength=\"${fps.coerceAtLeast(1)}\" Profile=\"Main\"><tt:Name>${if (token == "main") "MainStream" else "SubStream"}</tt:Name><tt:UseCount>1</tt:UseCount>" +
+            "<tt:Encoding>H264</tt:Encoding><tt:Resolution><tt:Width>$width</tt:Width><tt:Height>$height</tt:Height></tt:Resolution>" +
+            "<tt:RateControl ConstantBitRate=\"false\"><tt:FrameRateLimit>$fps</tt:FrameRateLimit><tt:BitrateLimit>$bitrate</tt:BitrateLimit></tt:RateControl>" +
+            "<tt:Quality>$quality</tt:Quality></$tag>"
     }
 
-    private fun media2(action: String, op: Element): String? = when (action) {
+    private fun media2(action: String, op: Element): String? {
+        return when (action) {
         "GetServiceCapabilities" -> "<tr2:GetServiceCapabilitiesResponse>${media2ServiceCaps()}</tr2:GetServiceCapabilitiesResponse>"
         "GetProfiles" -> {
             val want = OnvifXml.text(op, "Token")
@@ -618,37 +764,98 @@ class OnvifServer(
         "GetVideoSourceConfigurations" -> "<tr2:GetVideoSourceConfigurationsResponse>${videoSourceConfig("tr2:Configurations")}</tr2:GetVideoSourceConfigurationsResponse>"
         "GetVideoEncoderConfigurationOptions" -> {
             val s = stream()
-            val fps = s.fps.coerceAtLeast(1)
-            "<tr2:GetVideoEncoderConfigurationOptionsResponse><tr2:Options GovLengthRange=\"1 300\" FrameRatesSupported=\"$fps\" " +
+            val token = OnvifXml.text(op, "ConfigurationToken")?.removePrefix("vec_") ?: "main"
+            if (token !in profileTokens()) return fault("ter:InvalidArgVal", "Unknown encoder token")
+            val sub = token == "sub"
+            val width = if (sub) s.subWidth else s.width
+            val height = if (sub) s.subHeight else s.height
+            val upperFps = if (sub) 30 else 60
+            val bitrateMin = if (sub) 300 else 250
+            val bitrateMax = if (sub) 2000 else 80000
+            "<tr2:GetVideoEncoderConfigurationOptionsResponse><tr2:Options GovLengthRange=\"1 300\" FrameRatesSupported=\"$upperFps\" " +
                 "ProfilesSupported=\"Main\" ConstantBitRateSupported=\"false\" GuaranteedInstances=\"2\">" +
                 "<tt:Encoding>H264</tt:Encoding><tt:QualityRange><tt:Min>1</tt:Min><tt:Max>5</tt:Max></tt:QualityRange>" +
-                "<tt:ResolutionsAvailable><tt:Width>${s.width}</tt:Width><tt:Height>${s.height}</tt:Height></tt:ResolutionsAvailable>" +
-                "<tt:BitrateRange><tt:Min>${(s.bitrateKbps / 4).coerceAtLeast(64)}</tt:Min><tt:Max>${s.bitrateKbps * 2}</tt:Max></tt:BitrateRange>" +
+                "<tt:ResolutionsAvailable><tt:Width>$width</tt:Width><tt:Height>$height</tt:Height></tt:ResolutionsAvailable>" +
+                "<tt:BitrateRange><tt:Min>$bitrateMin</tt:Min><tt:Max>$bitrateMax</tt:Max></tt:BitrateRange>" +
                 "</tr2:Options></tr2:GetVideoEncoderConfigurationOptionsResponse>"
         }
-        // The stream is fixed by the app's own settings; accept (and ignore) client tuning so
-        // NVRs that "auto-configure" the encoder don't treat the camera as broken.
-        "SetVideoEncoderConfiguration" -> "<tr2:SetVideoEncoderConfigurationResponse/>"
+        "SetVideoEncoderConfiguration" -> {
+            setEncoderConfiguration(op)?.let { return it }
+            "<tr2:SetVideoEncoderConfigurationResponse/>"
+        }
         "GetVideoEncoderInstances" -> "<tr2:GetVideoEncoderInstancesResponse><tr2:Info><tr2:Codec><tr2:Encoding>H264</tr2:Encoding><tr2:Number>2</tr2:Number></tr2:Codec><tr2:Total>2</tr2:Total></tr2:Info></tr2:GetVideoEncoderInstancesResponse>"
         "GetVideoEncoderConfigurations" -> "<tr2:GetVideoEncoderConfigurationsResponse>${profileTokens().joinToString("") { media2EncoderConfig(it, "tr2:Configurations") }}</tr2:GetVideoEncoderConfigurationsResponse>"
-        "GetStreamUri" -> "<tr2:GetStreamUriResponse><tr2:Uri>${e(streamUri())}</tr2:Uri></tr2:GetStreamUriResponse>"
+        "GetStreamUri" -> "<tr2:GetStreamUriResponse><tr2:Uri>${e(streamUri(OnvifXml.text(op, "ProfileToken") ?: "main"))}</tr2:Uri></tr2:GetStreamUriResponse>"
         "GetSnapshotUri" -> if (snapshot == null) fault("ter:ActionNotSupported", "No snapshot")
             else "<tr2:GetSnapshotUriResponse><tr2:Uri>${e(baseUrl())}/onvif/snapshot.jpg</tr2:Uri></tr2:GetSnapshotUriResponse>"
         "GetAudioSourceConfigurations", "GetAudioEncoderConfigurations", "GetMetadataConfigurations", "GetAnalyticsConfigurations" ->
             "<tr2:${action}Response/>"
         "SetSynchronizationPoint" -> "<tr2:SetSynchronizationPointResponse/>"
         else -> null
+         }
     }
 
-    // ===================================================================== imaging (minimal)
+    // ===================================================================== imaging (LG Camera0, real focus)
 
-    private fun imaging(action: String): String? = when (action) {
-        "GetServiceCapabilities" -> "<timg:GetServiceCapabilitiesResponse><timg:Capabilities ImageStabilization=\"false\"/></timg:GetServiceCapabilitiesResponse>"
-        "GetImagingSettings" -> "<timg:GetImagingSettingsResponse><timg:ImagingSettings/></timg:GetImagingSettingsResponse>"
-        "GetOptions" -> "<timg:GetOptionsResponse><timg:ImagingOptions/></timg:GetOptionsResponse>"
-        "GetMoveOptions" -> "<timg:GetMoveOptionsResponse><timg:MoveOptions/></timg:GetMoveOptionsResponse>"
-        "GetStatus" -> "<timg:GetStatusResponse><timg:Status/></timg:GetStatusResponse>"
-        else -> null
+    private fun imaging(action: String, op: Element): String? {
+        val st = cameraStatus()
+        val focus = st.focusAvailable && st.maxFocusDiopters > 0f
+        val position = (st.focusDiopters / st.maxFocusDiopters.coerceAtLeast(0.01f))
+            .coerceIn(0f, 1f)
+        val mode = if (st.focusLocked) "MANUAL" else "AUTO"
+        return when (action) {
+            "GetServiceCapabilities" ->
+                "<timg:GetServiceCapabilitiesResponse><timg:Capabilities ImageStabilization=\"false\"/></timg:GetServiceCapabilitiesResponse>"
+            "GetImagingSettings" -> "<timg:GetImagingSettingsResponse><timg:ImagingSettings>" +
+                (if (focus) "<tt:Focus><tt:AutoFocusMode>$mode</tt:AutoFocusMode></tt:Focus>" else "") +
+                "</timg:ImagingSettings></timg:GetImagingSettingsResponse>"
+            "GetOptions" -> "<timg:GetOptionsResponse><timg:ImagingOptions>" +
+                (if (focus) "<tt:Focus><tt:AutoFocusModes>AUTO</tt:AutoFocusModes>" +
+                    "<tt:AutoFocusModes>MANUAL</tt:AutoFocusModes></tt:Focus>" else "") +
+                "</timg:ImagingOptions></timg:GetOptionsResponse>"
+            "GetMoveOptions" -> "<timg:GetMoveOptionsResponse><timg:MoveOptions>" +
+                (if (focus) "<tt:Absolute><tt:Position><tt:Min>0.0</tt:Min>" +
+                    "<tt:Max>1.0</tt:Max></tt:Position></tt:Absolute>" else "") +
+                "</timg:MoveOptions></timg:GetMoveOptionsResponse>"
+            "GetStatus" -> "<timg:GetStatusResponse><timg:Status>" +
+                (if (focus) "<tt:FocusStatus20><tt:Position>$position</tt:Position>" +
+                    "<tt:MoveStatus>IDLE</tt:MoveStatus></tt:FocusStatus20>" else "") +
+                "</timg:Status></timg:GetStatusResponse>"
+            "SetImagingSettings" -> {
+                if (!focus) return fault("ter:ActionNotSupported", "Focus control unavailable")
+                if (OnvifXml.text(op, "VideoSourceToken") !in listOf(null, "vs0"))
+                    return fault("ter:InvalidArgVal", "Unknown VideoSourceToken")
+                val requested = OnvifXml.text(op, "AutoFocusMode")
+                    ?: return fault("ter:InvalidArgVal", "Only focus mode is supported")
+                val ok = when (requested.uppercase()) {
+                    "AUTO" -> cameraControl("lg_main0_focus_mode", "auto")
+                    "MANUAL" -> cameraControl("lg_main0_focus_mode", "diopters")
+                    else -> return fault("ter:InvalidArgVal", "Unsupported focus mode")
+                }
+                if (!ok) fault("ter:Action", "Unable to apply focus mode")
+                else "<timg:SetImagingSettingsResponse/>"
+            }
+            "Move" -> {
+                if (!focus) return fault("ter:ActionNotSupported", "Focus control unavailable")
+                if (OnvifXml.text(op, "VideoSourceToken") !in listOf(null, "vs0"))
+                    return fault("ter:InvalidArgVal", "Unknown VideoSourceToken")
+                val absolute = OnvifXml.find(op, "Absolute")
+                    ?: return fault("ter:ActionNotSupported", "Only absolute focus is supported")
+                val p = OnvifXml.text(absolute, "Position")?.toFloatOrNull()
+                    ?.takeIf { it.isFinite() && it in 0f..1f }
+                    ?: return fault("ter:InvalidArgVal", "Focus position must be 0..1")
+                val selectedDiopters = (p * st.maxFocusDiopters).coerceIn(0f, st.maxFocusDiopters)
+                if (!cameraControl("lg_main0_focus_mode", "diopters") ||
+                    !cameraControl("lg_main0_focus_diopters", selectedDiopters.toString()))
+                    return fault("ter:Action", "Unable to lock absolute focus")
+                "<timg:MoveResponse/>"
+            }
+            "Stop" -> {
+                if (!focus) fault("ter:ActionNotSupported", "Focus not available")
+                else "<timg:StopResponse/>" // Absolute focus sets lens once, no ongoing movement.
+            }
+            else -> null
+        }
     }
 
     // ===================================================================== events
@@ -674,7 +881,15 @@ class OnvifServer(
         "<tns1:VideoSource wstop:topic=\"false\"><tns1:MotionAlarm wstop:topic=\"true\">" +
         messageDescription(listOf("Source" to "tt:ReferenceToken"), "State" to "xs:boolean") +
         "</tns1:MotionAlarm></tns1:VideoSource>" +
-        "</wstop:TopicSet>" +
+        "<apph:DeviceHealth wstop:topic=\"false\">" +
+        listOf("BatteryPercent" to "xs:int", "BatteryTemperatureC" to "xs:float",
+            "SoCTemperatureC" to "xs:float", "CpuPercent" to "xs:int")
+            .joinToString("") { (name, type) ->
+                "<apph:$name wstop:topic=\"true\">" +
+                    messageDescription(listOf("Source" to "xs:string"), "Value" to type) +
+                    "</apph:$name>"
+            } +
+        "</apph:DeviceHealth></wstop:TopicSet>" +
         "<wsnt:TopicExpressionDialect>$TOPIC_DIALECT</wsnt:TopicExpressionDialect>" +
         "<wsnt:TopicExpressionDialect>http://docs.oasis-open.org/wsnt/t-1/TopicExpression/ConcreteSet</wsnt:TopicExpressionDialect>" +
         "<tev:MessageContentFilterDialect>http://www.onvif.org/ver10/tev/messageContentFilter/ItemFilter</tev:MessageContentFilterDialect>" +
@@ -698,6 +913,26 @@ class OnvifServer(
             ),
             notificationMessage(TOPIC_ALARM, utc, op, listOf("Source" to "vs0"), "State" to active.toString())
         )
+    }
+
+    /**
+     * Vendor ONVIF PullPoint property events. ONVIF Profile S does not define
+     * generic battery, SoC or CPU attributes, so these are explicitly namespaced.
+     * Clients that ignore vendor topics still receive standard motion events.
+     */
+    private fun healthMessages(now: Long): List<String> {
+        val st = cameraStatus()
+        val utc = OnvifXml.isoUtc(now)
+        val values = listOfNotNull(
+            st.batteryPercent?.coerceIn(0, 100)?.let { "BatteryPercent" to it.toString() },
+            st.batteryCelsius?.takeIf { it.isFinite() }?.let { "BatteryTemperatureC" to it.toString() },
+            st.socCelsius?.takeIf { it.isFinite() }?.let { "SoCTemperatureC" to it.toString() },
+            st.cpuPercent?.takeIf { it >= 0 }?.let { "CpuPercent" to it.toString() }
+        )
+        return values.map { (name, value) ->
+            notificationMessage("apph:DeviceHealth/$name", utc, "Changed",
+                listOf("Source" to "LG-H872"), "Value" to value)
+        }
     }
 
     private fun enqueue(s: Subscription, msgs: List<String>) {
@@ -736,7 +971,8 @@ class OnvifServer(
                 }
                 val sub = Subscription(OnvifXml.randomHex(8), term.coerceAtLeast(now + 10_000))
                 subscriptions[sub.id] = sub
-                enqueue(sub, motionMessages(motion, "Initialized", now))
+                enqueue(sub, motionMessages(motion, "Initialized", now) + healthMessages(now))
+                sub.lastHealthAtMs = now
                 onLog("ONVIF pull-point subscription ${sub.id} created")
                 "<tev:CreatePullPointSubscriptionResponse><tev:SubscriptionReference>" +
                     "<wsa:Address>${baseUrl()}/onvif/pullpoint/${sub.id}</wsa:Address></tev:SubscriptionReference>" +
@@ -748,6 +984,10 @@ class OnvifServer(
                 val timeout = (OnvifXml.text(op, "Timeout")?.let { OnvifXml.parseDuration(it) } ?: 10_000L).coerceIn(0L, MAX_PULL_WAIT_MS)
                 val limit = (OnvifXml.text(op, "MessageLimit")?.toIntOrNull() ?: 100).coerceAtLeast(1)
                 val deadline = now + timeout
+                if (now - sub.lastHealthAtMs >= 10_000L) {
+                    enqueue(sub, healthMessages(now))
+                    sub.lastHealthAtMs = now
+                }
                 val msgs = ArrayList<String>()
                 synchronized(sub.lock) {
                     while (sub.queue.isEmpty() && !stopped && subscriptions.containsKey(sub.id)) {
@@ -769,8 +1009,13 @@ class OnvifServer(
             }
             "SetSynchronizationPoint" -> {
                 val sub = subscriptionFor(path, header)
-                if (sub != null) enqueue(sub, motionMessages(motion, "Initialized", now))
-                else subscriptions.values.forEach { enqueue(it, motionMessages(motion, "Initialized", now)) }
+                if (sub != null) {
+                    enqueue(sub, motionMessages(motion, "Initialized", now) + healthMessages(now))
+                    sub.lastHealthAtMs = now
+                } else subscriptions.values.forEach {
+                    enqueue(it, motionMessages(motion, "Initialized", now) + healthMessages(now))
+                    it.lastHealthAtMs = now
+                }
                 "<tev:SetSynchronizationPointResponse/>"
             }
             "Seek" -> fault("ter:ActionNotSupported", "Seek not supported")

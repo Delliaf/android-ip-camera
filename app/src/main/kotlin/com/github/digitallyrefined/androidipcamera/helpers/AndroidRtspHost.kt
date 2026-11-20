@@ -23,7 +23,12 @@ internal class AndroidRtspHost(
         prefs.getString(RtspServer.PREF_PORT, null)?.toIntOrNull()?.takeIf { it in 1..65535 } ?: RtspServer.DEFAULT_PORT
 
     override fun credentials(): RtspCredentials {
-        if (!prefs.getBoolean("enable_auth", true)) return RtspCredentials.Disabled
+        // Independent from Web/ONVIF after the user sets rtsp_auth_enabled.
+        // Before migration, preserve the old enable_auth setting rather
+        // than silently exposing an existing password-protected RTSP server.
+        val protectRtsp = prefs.getBoolean("rtsp_auth_enabled",
+            prefs.getBoolean("enable_auth", true))
+        if (!protectRtsp) return RtspCredentials.Disabled
         val storage = SecureStorage(context)
         val username = InputValidator.validateAndSanitizeUsername(storage.getSecureString(SecureStorage.KEY_USERNAME, "") ?: "")
         val password = InputValidator.validateAndSanitizePassword(storage.getSecureString(SecureStorage.KEY_PASSWORD, "") ?: "")

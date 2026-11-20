@@ -6,6 +6,7 @@ import org.bouncycastle.cert.jcajce.JcaX509v3CertificateBuilder
 import org.bouncycastle.jce.provider.BouncyCastleProvider
 import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.BufferedReader
@@ -131,7 +132,7 @@ class TlsServerTest {
     }
 
     @Test
-    fun `onvif server serves https and advertises tls URLs`() {
+    fun `onvif https transport does not alter independent rtsp scheme`() {
         val material = material()
         val server = OnvifServer(
             port = 0,
@@ -158,7 +159,11 @@ class TlsServerTest {
                     "<trt:ProfileToken>main</trt:ProfileToken></trt:GetStreamUri>"
             ))
             assertEquals(stream.text, 200, stream.status)
-            assertTrue(stream.text.contains("rtsps://192.168.3.194:8554/live"))
+            // ONVIF SOAP HTTPS and RTSP/RSTPS are independent transports.
+            // StreamingService now chooses RTSP TLS using rtsp_tls_enabled;
+            // OnvifServer must not rewrite a plain RTSP stream URL.
+            assertTrue(stream.text.contains("rtsp://192.168.3.194:8554/live"))
+            assertFalse(stream.text.contains("rtsps://192.168.3.194:8554/live"))
 
             val snapshot = server.handle("POST", "/onvif/media_service", emptyMap(), envelope(
                 "<trt:GetSnapshotUri><trt:ProfileToken>main</trt:ProfileToken></trt:GetSnapshotUri>"

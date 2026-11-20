@@ -396,6 +396,16 @@ internal class RtspServer(
 
         fun run() {
             try {
+                // No-password RTSP is for trusted local networks, never a
+                // public interface. Authenticated clients may use remote IPs.
+                val address = socket.inetAddress
+                if (host.credentials() == RtspCredentials.Disabled &&
+                    !address.isLoopbackAddress && !address.isSiteLocalAddress &&
+                    !address.isLinkLocalAddress) {
+                    host.log("SECURITY: anonymous RTSP blocked from non-LAN peer")
+                    try { respond(null, "403 Forbidden") } catch (_: Exception) {}
+                    return
+                }
                 socket.tcpNoDelay = true
                 socket.keepAlive = true
                 val reader = RtspRequestReader(BufferedInputStream(socket.getInputStream()))

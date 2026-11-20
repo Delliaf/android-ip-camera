@@ -76,10 +76,29 @@
             android:defaultValue="8000"
             android:inputType="number"
             android:singleLine="true" />
+        <Preference
+            android:key="onvif_transport_info"
+            android:title="ONVIF transport: HTTP only"
+            android:summary="Independent of Web HTTPS and RTSP TLS. Works with go2rtc onvif:// on a trusted LAN; do not expose port 8000 to the Internet." />
         <CheckBoxPreference
-            android:key="onvif_tls_enabled"
-            android:title="ONVIF over HTTPS (TLS)"
-            android:summary="Enabled by default if web HTTPS is enabled. Turn OFF for go2rtc onvif:// over HTTP; ONVIF credentials are then unencrypted on your LAN. Web/RTSP TLS are unchanged."
+            android:key="onvif_auth_enabled"
+            android:title="Require ONVIF authentication"
+            android:summary="OFF for local go2rtc discovery. When ON, uses securely stored username/password, independently from the Web and RTSP authentication toggle; avoid plaintext credentials on untrusted networks."
+            android:defaultValue="false" />
+        <CheckBoxPreference
+            android:key="rtsp_auth_enabled"
+            android:title="Require RTSP authentication"
+            android:summary="Independent from Web and ONVIF. OFF permits anonymous RTSP only from LAN/loopback; never forward RTSP port to Internet. Existing installations keep their previous protection until this switch is changed."
+            android:defaultValue="true" />
+        <CheckBoxPreference
+            android:key="rtsp_tls_enabled"
+            android:title="RTSP over TLS (RTSPS)"
+            android:summary="OFF for conventional rtsp:// clients and go2rtc. Enable only for clients that support rtsps://; independent of Web HTTPS and ONVIF HTTP."
+            android:defaultValue="false" />
+        <CheckBoxPreference
+            android:key="lg_main0_background_hold"
+            android:title="Keep LG G6 camera active with RTSP"
+            android:summary="Retain one headless camera/encoder session across screen lock and RTSP reconnects. Uses more battery and may raise device temperature. Android8 LG-H872 Camera0 only."
             android:defaultValue="true" />
     </PreferenceCategory>
 

@@ -75,6 +75,7 @@ class StreamingService : LifecycleService() {
     private var rtspServer: RtspServer? = null
     /** Optional ONVIF service (Settings > ONVIF) advertising the RTSP stream and motion events. */
     @Volatile private var onvifServer: OnvifServer? = null
+    private val onvifPerformanceMonitor by lazy { DevicePerformanceMonitor(this) }
     private var multicastLock: android.net.wifi.WifiManager.MulticastLock? = null
     /** Motion detection over the capture frames already delivered to the streaming pipeline. */
     private var motionMonitor: MotionMonitor? = null
@@ -281,6 +282,12 @@ class StreamingService : LifecycleService() {
             return
         }
         val prefs = PreferenceManager.getDefaultSharedPreferences(this)
+        if (!prefs.contains("rtsp_auth_enabled")) {
+            // Migrate existing installations without weakening RTSP protection
+            // or unexpectedly turning on auth for users who opted out.
+            prefs.edit().putBoolean("rtsp_auth_enabled",
+                prefs.getBoolean("enable_auth", true)).apply()
+        }
         // Earlier versions kept "camera2_unusable" forever after one CameraX start without frames, which
         // pinned capable phones to Camera1. Drop it so the next frame-needing start tests CameraX again.
         if (prefs.contains(CameraXFallback.LEGACY_PREF)) prefs.edit().remove(CameraXFallback.LEGACY_PREF).apply()
@@ -297,7 +304,11 @@ class StreamingService : LifecycleService() {
             }
         } else {
             frontFacing = false
-            selectedCameraId = null
+            // Android8 LG-H872 Main0 should use the actual Camera2 ID rather
+            // than logical "back" on cold start. The latter bypasses the
+            // Direct Camera2 fallback/locked-focus policy and pins Camera1.
+            selectedCameraId = if (LgG6Main0Profile.isDevice())
+                LgG6Main0Profile.CAMERA_ID else null
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             registerReceiver(notificationChannelReceiver,
@@ -484,13 +495,34 @@ class StreamingService : LifecycleService() {
         }
     }
 
-    // MainActivity attaches PreviewView here; camera restarts when a surface is set while streaming.
+    /** Opt-in-by-default H872 server-camera pin while RTSP is enabled.
+     * The service (not Activity PreviewView) owns the capture and wake lock.
+     * This trades battery/thermal use for continuity across lock/unlock and
+     * viewer reconnects; users may disable it in Android app settings.
+     */
+    private fun holdCameraForRtsp(): Boolean {
+        val prefs = PreferenceManager.getDefaultSharedPreferences(this)
+        val main0 = LgG6Main0Profile.isTarget(camId()) ||
+            (LgG6Main0Profile.isDevice() && selectedCameraId == null && !frontFacing)
+        return main0 &&
+            prefs.getBoolean("lg_main0_background_hold", true) &&
+            prefs.getBoolean(RtspServer.PREF_ENABLED, false)
+    }
+
     fun setPreviewSurface(surfaceProvider: Preview.SurfaceProvider?) {
+        if (currentSurfaceProvider === surfaceProvider &&
+            captureRunning && cameraDelivering()) return
         currentSurfaceProvider = surfaceProvider
-        // Recording owns the camera session: stopping or restarting the camera now would tear
-        // down the encoder and finalize the file, so leave the pipeline alone until it stops.
+        // A pinned H.264 session is already headless; changing the Activity
+        // surface on lock/unlock MUST NOT destroy the Camera2/encoder session.
+        if (captureRunning && holdCameraForRtsp() &&
+            runningSession?.serves(cameraDemand(), streamFps(), camId()) == true) {
+            Log.i(TAG, "LG H872 background session retained on PreviewView detach/attach")
+            return
+        }
         if (localRecorder?.isRecording == true) return
-        val shouldRun = encoders.any { it.hasClients() } || currentSurfaceProvider != null || motionEnabled()
+        val shouldRun = encoders.any { it.hasClients() } ||
+            currentSurfaceProvider != null || motionEnabled() || holdCameraForRtsp()
         if (shouldRun) {
             debouncedStartCamera()
         } else {
@@ -726,14 +758,25 @@ class StreamingService : LifecycleService() {
                     streamingEnabled = { streamingServerHelper?.isStreamingEnabled() != false }
                 ),
                 DeviceMemoryHelper.rtspSendQueueCapacity(this),
-                // Same certificate as the web server; null when TLS is disabled.
-                tls = { TlsHelper.serverConfig(this) }
+                // RTSP TLS is independent of Web HTTPS/ONVIF transport.
+                // Plain rtsp:// is the compatible default for LAN NVR/go2rtc.
+                tls = {
+                    if (PreferenceManager.getDefaultSharedPreferences(this)
+                            .getBoolean("rtsp_tls_enabled", false))
+                        TlsHelper.serverConfig(this) else null
+                }
             )
             h264StreamingEncoder?.rtspServer = rtspServer
         }
         streamingServerHelper?.startStreamingServer()
         startRtspServerIfEnabled()
         startOnvifIfEnabled()
+        if (holdCameraForRtsp()) {
+            acquireStreamingWakeLock()
+            launchMain {
+                if (!captureRunning) startCamera(force = true)
+            }
+        }
         // A recording mode other than "off" keeps the camera running with no viewer. Continuous
         // mode also starts the segmented recorder; its first start brings the camera up itself.
         if (motionEnabled()) {
@@ -782,6 +825,11 @@ class StreamingService : LifecycleService() {
         }
         if (onvifServer != null) return
         val rtspPort = prefPort(RtspServer.PREF_PORT, RtspServer.DEFAULT_PORT)
+        if (prefs.getBoolean("onvif_auth_enabled", false) && savedOnvifCredentials() == null) {
+            Log.e(TAG, "ONVIF authentication requested but no valid stored credentials; refusing to start an open ONVIF listener")
+            onLog?.invoke("ONVIF not started: configure username/password first or disable ONVIF authentication")
+            return
+        }
         val version = try { packageManager.getPackageInfo(packageName, 0).versionName ?: "" } catch (_: Exception) { "" }
         val onvif = OnvifServer(
             port = prefPort(PREF_ONVIF_PORT, 8000),
@@ -800,26 +848,95 @@ class StreamingService : LifecycleService() {
             stream = {
                 val size = desiredSize()
                 val fps = (prefs.getString("stream_fps", "30")?.toIntOrNull() ?: 30).coerceIn(1, 60)
-                val scheme = if (TlsHelper.isEnabled(this)) "rtsps" else "rtsp"
+                val scheme = if (prefs.getBoolean("rtsp_tls_enabled", false)) "rtsps" else "rtsp"
+                val shortEdge = minOf(size.width, size.height).coerceAtLeast(1)
+                val subShort = (prefs.getString(RtspServer.PREF_SUB_SIZE, "360")
+                    ?.toIntOrNull() ?: 360).coerceIn(240, 720)
+                fun evenSize(n: Int) = (n.coerceAtLeast(2) / 2) * 2
+                val subWidth = evenSize(size.width * subShort / shortEdge)
+                val subHeight = evenSize(size.height * subShort / shortEdge)
                 OnvifStreamInfo(
                     rtspUrl = "$scheme://${getLocalIpAddress()}:$rtspPort${RtspServer.PATH}",
                     width = size.width, height = size.height, fps = fps,
                     bitrateKbps = H264HardwareEncoder.bitrateFor(size.width, size.height, mainBitrateKbps()) / 1000,
+                    quality = (prefs.getString("onvif_video_quality", "5")
+                        ?.toIntOrNull() ?: 5).coerceIn(1, 5),
+                    subWidth = subWidth,
+                    subHeight = subHeight,
+                    subFps = (prefs.getString(RtspServer.PREF_SUB_FPS, "15")
+                        ?.toIntOrNull() ?: 15).coerceIn(1, 30),
+                    subBitrateKbps = (prefs.getString(RtspServer.PREF_SUB_BITRATE, "500")
+                        ?.toIntOrNull() ?: 500).coerceIn(250, 2000),
+                    subRtspUrl = "$scheme://${getLocalIpAddress()}:$rtspPort${RtspServer.SUB_PATH}"
                 )
             },
-            credentials = { streamCredentials() },
+            // ONVIF credentials are opt-in and INDEPENDENT of the Web/RTSP
+            // authentication toggle. Plain HTTP ONVIF is LAN-only by default.
+            credentials = {
+                if (prefs.getBoolean("onvif_auth_enabled", false))
+                    savedOnvifCredentials() else null
+            },
             // Snapshots use the regular still-capture path, so they work whether or not a
             // stream is running (a snapshot opens the camera on demand and restores the stream).
             snapshot = { snapshot(camId()) },
-            onLog = { Log.i(TAG, "ONVIF: $it"); onLog?.invoke("ONVIF: $it") },
-            // Independent ONVIF transport setting: keep HTTPS as the default
-            // for existing installations; allow explicit LAN HTTP for go2rtc's
-            // onvif:// protocol without disabling web/RTSPS encryption.
-            tls = {
-                if (prefs.getBoolean("onvif_tls_enabled", true))
-                    TlsHelper.serverConfig(this)
-                else null
+            cameraStatus = {
+                val perf = onvifPerformanceMonitor.sample()
+                val st = PreferenceManager.getDefaultSharedPreferences(this)
+                val focusOnMain = LgG6Main0Profile.isTarget(camId())
+                val maxDiopters = try {
+                    val mgr = getSystemService(Context.CAMERA_SERVICE) as CameraManager
+                    mgr.getCameraCharacteristics("0").get(
+                        CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE) ?: 10f
+                } catch (_: Exception) { 10f }
+                val battery = try {
+                    val state = registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+                    state?.getIntExtra(android.os.BatteryManager.EXTRA_LEVEL, -1)?.takeIf { it >= 0 }
+                } catch (_: Exception) { null }
+                OnvifControlStatus(
+                    focusAvailable = focusOnMain,
+                    focusLocked = focusOnMain &&
+                        st.getString(LgG6Main0Profile.PREF_FOCUS_MODE, "auto") == "diopters",
+                    focusDiopters = st.getString(LgG6Main0Profile.PREF_FOCUS_DIOPTERS, "0.25")
+                        ?.toFloatOrNull()?.coerceIn(0f, maxDiopters) ?: 0.25f,
+                    maxFocusDiopters = maxDiopters,
+                    torchAvailable = flashAnchorCameraId() != null,
+                    torchEnabled = st.getString(PREF_CAMERA_TORCH, "off") == "on",
+                    batteryPercent = battery,
+                    batteryCelsius = perf.batteryTemperatureCelsius,
+                    socCelsius = perf.temperatureCelsius,
+                    cpuPercent = perf.cpuPercent.takeIf { it >= 0 },
+                )
             },
+            cameraControl = { key, value ->
+                val valid = when (key) {
+                    "lg_main0_focus_mode" -> LgG6Main0Profile.isTarget(camId()) &&
+                        value in listOf("auto", "diopters")
+                    "lg_main0_focus_diopters" -> LgG6Main0Profile.isTarget(camId()) &&
+                        value.toFloatOrNull()?.let { it.isFinite() && it in 0f..10f } == true
+                    "torch" -> value in listOf("on", "off")
+                    "fps" -> value.toIntOrNull()?.let { it in 1..60 } == true
+                    "stream_bitrate_kbps" -> value.toIntOrNull()?.let { it in 250..80000 } == true
+                    "onvif_video_quality" -> value.toIntOrNull()?.let { it in 1..5 } == true
+                    "rtsp_sub_fps" -> value.toIntOrNull()?.let { it in listOf(10,15,20,30) } == true
+                    "rtsp_sub_bitrate" -> value.toIntOrNull()?.let {
+                        it in listOf(300,500,800,1200,2000) } == true
+                    else -> false
+                }
+                if (!valid || ((key == "fps" || key == "stream_bitrate_kbps" ||
+                        key == "onvif_video_quality") && localRecorder?.isRecording == true)) false
+                else try {
+                    handleRemoteControl(key, value, 0L)
+                    true
+                } catch (e: Exception) {
+                    Log.w(TAG, "ONVIF control ${key} rejected: ${e.message}")
+                    false
+                }
+            },
+            onLog = { Log.i(TAG, "ONVIF: $it"); onLog?.invoke("ONVIF: $it") },
+            // Standard ONVIF SOAP/WS-Discovery on plain HTTP; legacy saved
+            // onvif_tls_enabled=true is intentionally ignored. Web HTTPS and
+            // opt-in RTSPS have their own transport and authentication.
+            tls = { null },
             bindAddress = ListenInterface.resolve(this)
         )
         try {
@@ -843,6 +960,15 @@ class StreamingService : LifecycleService() {
                 multicastLock = null
             }
         }
+    }
+
+    private fun savedOnvifCredentials(): Pair<String, String>? {
+        val storage = SecureStorage(this)
+        val user = InputValidator.validateAndSanitizeUsername(
+            storage.getSecureString(SecureStorage.KEY_USERNAME, "") ?: "")
+        val password = InputValidator.validateAndSanitizePassword(
+            storage.getSecureString(SecureStorage.KEY_PASSWORD, "") ?: "")
+        return if (user.isNullOrBlank() || password.isNullOrBlank()) null else user to password
     }
 
     private fun streamCredentials(): Pair<String, String>? {
@@ -911,6 +1037,14 @@ class StreamingService : LifecycleService() {
                 return@launchMain
             }
             if (!hasActiveClients()) {
+                if (holdCameraForRtsp()) {
+                    // Do not shed H264 into a preview-only CameraX/Camera1
+                    // session on last-client disconnect; manual focus is lost.
+                    acquireStreamingWakeLock()
+                    Log.i(TAG, "LG H872 headless RTSP session retained after last viewer")
+                    updateSubStream()
+                    return@launchMain
+                }
                 // No viewers left: the device may sleep again.
                 releaseStreamingWakeLock()
                 // Reload/idle: keep the LED lit across the session gap before the
@@ -1141,7 +1275,8 @@ class StreamingService : LifecycleService() {
      */
     private suspend fun stopCameraWhenIdle(): Boolean {
         val stopped = cameraMutex.withLock {
-            if (hasActiveClients() || currentSurfaceProvider != null) false else { stopCamera(); true }
+            if (hasActiveClients() || currentSurfaceProvider != null || holdCameraForRtsp())
+                false else { stopCamera(); true }
         }
         if (stopped) Camera1Capture.awaitReleased(CAMERA1_RELEASE_WAIT_MS)
         return stopped
@@ -1149,7 +1284,9 @@ class StreamingService : LifecycleService() {
 
     /** What the viewers, recording, motion detection, a snapshot and the on-phone preview ask of the camera now. */
     private fun cameraDemand() = CameraDemand(
-        h264Viewers = h264StreamingEncoder?.hasClients() == true,
+        // Virtual H264 consumer keeps the SAME encoder/session alive even with
+        // zero RTSP clients, so reconnect and screen lock do not rebind the HAL.
+        h264Viewers = h264StreamingEncoder?.hasClients() == true || holdCameraForRtsp(),
         mjpegViewers = mjpegStreamingEncoder?.hasClients() == true,
         recording = recordingNeeded || localRecorder?.isRecording == true,
         motion = motionEnabled(),
@@ -1325,7 +1462,8 @@ class StreamingService : LifecycleService() {
             return@withLock
         }
         val hasClients = encoders.any { it.hasClients() }
-        if (!force && !hasClients && currentSurfaceProvider == null && !motionEnabled()) {
+        if (!force && !hasClients && currentSurfaceProvider == null &&
+            !motionEnabled() && !holdCameraForRtsp()) {
             Log.i(TAG, "startCamera bypassed: no force, no clients, and preview surface is null")
             return@withLock
         }
@@ -1426,9 +1564,39 @@ class StreamingService : LifecycleService() {
                     // cameraserver down with it, a start without frames says nothing about Camera2.
                     if (framed || !Camera1Capture.unsettled(CAMERA1_SETTLE_MS)) recordCameraXFrames(prefs, camera, framed)
                     if (!framed) {
-                        Log.w(TAG, "CameraX bound but no frames within ${CAMERAX_FRAME_GRACE_MS}ms, falling back to Camera1")
+                        Log.w(TAG, "CameraX bound but no frames within ${CAMERAX_FRAME_GRACE_MS}ms")
                         stopCamera()
-                        startCamera1Backend(want, demand)
+                        // LG-H872 Camera1 cannot set lens diopters. Retain a manual
+                        // focus lock by trying the proven Direct Camera2 PRIVATE
+                        // path *before* accepting Camera1's continuous-video AF.
+                        val tryDirect = LgG6Main0Profile.isTarget(camera) && demand.h264 &&
+                            !demand.mjpegViewers && !demand.motion &&
+                            !demand.snapshot && !demand.screenPreview
+                        var directWorked = false
+                        if (tryDirect) {
+                            try {
+                                // 960x720 PRIVATE is actually observed in H872 logs;
+                                // unlike 4160x3120 CameraX YUV it has been stable.
+                                startLgMain0DirectBackend(want, want)
+                                val direct = backend as? LgG6Main0DirectCapture
+                                var waited = 0L
+                                while (direct != null && !direct.failed &&
+                                    direct.lastFrameAtMs <= 0L && waited < 5000L) {
+                                    kotlinx.coroutines.delay(100)
+                                    waited += 100L
+                                }
+                                directWorked = direct != null && !direct.failed &&
+                                    direct.lastFrameAtMs > 0L
+                                if (!directWorked) stopCamera()
+                            } catch (e: Exception) {
+                                Log.w(TAG, "Camera0 Direct fallback unavailable: ${e.message}")
+                                stopCamera()
+                            }
+                        }
+                        if (!directWorked) {
+                            Log.w(TAG, "Camera0 falling back to Camera1; exact manual diopters unavailable")
+                            startCamera1Backend(want, demand)
+                        }
                     }
                 }
             }
@@ -2560,6 +2728,23 @@ class StreamingService : LifecycleService() {
                     edit.putString("${key}_$physicalId", n.toString())
                 edit.apply()
                 launchMain { applyRoiToPipes() }
+            }
+            "fps" -> {
+                val n = value.toIntOrNull()?.takeIf { it in 1..60 } ?: return
+                prefs.edit().putString("stream_fps", n.toString()).apply()
+                // Previously only MjpegStreamingEncoder persisted FPS; the
+                // active H264/RTSP encoder never reloaded it. Fix for ONVIF
+                // SetVideoEncoderConfiguration AND the web FPS control.
+                if (captureRunning && localRecorder?.isRecording != true) debouncedStartCamera()
+            }
+            "onvif_video_quality" -> {
+                val quality = value.toIntOrNull()?.takeIf { it in 1..5 } ?: return
+                val presetKbps = listOf(1000, 3000, 6000, 12000, 24000)[quality - 1]
+                prefs.edit()
+                    .putString("onvif_video_quality", quality.toString())
+                    .putString("stream_bitrate_kbps", presetKbps.toString())
+                    .apply()
+                if (captureRunning && localRecorder?.isRecording != true) debouncedStartCamera()
             }
             "stream_bitrate_kbps" -> {
                 val kbps = value.toIntOrNull()

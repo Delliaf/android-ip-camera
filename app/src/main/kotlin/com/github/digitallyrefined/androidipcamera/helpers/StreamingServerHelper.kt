@@ -1580,6 +1580,7 @@ class StreamingServerHelper(
         val rtspSubFps: String,
         val rtspSubBitrate: String,
         val streamBitrateKbps: String,
+        val onvifVideoQuality: String,
         val mjpegQuality: String,
         val captureResolution: String,
         val lgZoomMode: String,
@@ -1708,6 +1709,7 @@ class StreamingServerHelper(
                 put("rtspSubFps", settings.rtspSubFps)
                 put("rtspSubBitrate", settings.rtspSubBitrate)
                 put("streamBitrateKbps", settings.streamBitrateKbps)
+                put("onvifVideoQuality", settings.onvifVideoQuality)
                 put("mjpegQuality", settings.mjpegQuality)
                 put("captureResolution", settings.captureResolution)
                 put("lgZoomMode", settings.lgZoomMode)
@@ -1914,6 +1916,7 @@ class StreamingServerHelper(
             rtspSubBitrate = prefs.getString(RtspServer.PREF_SUB_BITRATE, null)
                 ?: RtspServer.DEFAULT_SUB_BITRATE_KBPS.toString(),
             streamBitrateKbps = prefs.getString("stream_bitrate_kbps", "auto") ?: "auto",
+            onvifVideoQuality = prefs.getString("onvif_video_quality", "5") ?: "5",
             mjpegQuality = prefs.getString("mjpeg_quality", "auto") ?: "auto",
             captureResolution = prefs.getString("capture_resolution", "match") ?: "match",
             lgZoomMode = prefs.getString(LgG6Main0Profile.PREF_ZOOM_MODE, "isp") ?: "isp",
