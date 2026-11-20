@@ -53,3 +53,18 @@
 - Проверено через Github API: `actions/runs?branch=fix/lg-g6-focus-onvif-lifecycle-20261120` вернул `total_count=0` **после** source commits и PR #8; CI не запускался и не опубликован APK .11. Причину отсутствия запуска API не показывает; не предполагать ни квоты, ни неисправность репозитория без доказательства.
 - Дополнительный тест `scripts/test-onvif-transport.cjs` в Android8 workflow проверяет независимый ONVIF HTTP, RTSP auth migration и включённые SOAP команды; `scripts/test-onvif-rtsp-ui.cjs` проверяет реальные селекторы качества.
 - Окончательный статус: **source-implemented / CI-blocked / not device-verified**, PR draft. Следующий исполнитель должен сначала обеспечить GitHub Actions запуск для exact HEAD и исправить возможные ошибки Kotlin/JUnit; только после SUCCESS выдавать APK.
+
+
+## 2026-11-20 — fresh build requested; automated CI bootstrap and real failures
+
+User explicitly requested an installable fresh build with PR8 changes. Existing feature-branch CI had no runs. Added a **reusable default-branch builder** at `.github/workflows/h872-experimental-apk.yml` on `main`, which accepts `source_ref` via workflow_dispatch, and its initial push action checked out PR8 HEAD, ran JS and Gradle and verified ARM64. This also restored automatic push CI runs on PR8 branch.
+
+CI attempts:
+1. [default-branch run 44744330085](https://github.com/Delliaf/android-ip-camera/actions/runs/44744330085): failed at JS test `scripts/test-onvif-transport.cjs` line13; test mistakenly searched `StreamingService.kt` instead of actual RTSP auth owner `AndroidRtspHost.kt`. Corrected in `683ad39f4141231916371ee81e91d9ab670fbb26`.
+2. [feature branch run 44744551017](https://github.com/Delliaf/android-ip-camera/actions/runs/44744551017): JavaScript passed, Kotlin compiler failed `UNRESOLVED_REFERENCE anyBackCameraWithFlash` in ONVIF status adapter. Existing `flashAnchorCameraId()` is the correct known flash capability check; corrected in `e752d1c364abd29905d0bd8b080495d4a7fc13a2`.
+3. [feature branch run 44745253243](https://github.com/Delliaf/android-ip-camera/actions/runs/44745253243): Kotlin compilation successful; **188 unit tests, 187 passed, 1 failed**. Old `TlsServerTest.kt:161` expected ONVIF HTTPS to rewrite plain `rtsp://` to `rtsps://`; newer architecture correctly decouples ONVIF HTTP/TLS and RTP/RTSP schemes. Updated test to assert `rtsp://` unchanged and no `rtsps://` unless separately configured, in `a50d279124f1fa8e7f632f0ec87aa00436b39447`.
+4. [feature branch run 44746118951](https://github.com/Delliaf/android-ip-camera/actions/runs/44746118951) triggered for latest `a50d279...`; **currently awaiting final CI result**. Must verify all tests, APK upload and arm64-v8a-only before calling build complete.
+
+New main builder records source-sha.txt and apk-sha256.txt with the APK and targets only ARM64-V8A; it does NOT merge PR8 into main. Prior main retry run 44744576842 used older source SHA and should not be distributed as latest APK.
+
+Next developer: check CI run 44746118951, resolve remaining failures and confirm exact source SHA and artifacts; update THIS journal and PR8 with final verified result. Do not claim hardware validation by JVM.
