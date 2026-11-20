@@ -270,14 +270,14 @@ class MainActivity : AppCompatActivity() {
         val prefs = PreferenceManager.getDefaultSharedPreferences(this)
         val tlsEnabled = prefs.getBoolean("tls_enabled", true)
         val protocol = if (tlsEnabled) "https" else "http"
-        val rtspProtocol = if (tlsEnabled) "rtsps" else "rtsp"
+        val rtspProtocol = if (prefs.getBoolean("rtsp_tls_enabled", false)) "rtsps" else "rtsp"
         val port = prefs.getString("server_port", "4444")?.toIntOrNull() ?: 4444
         val rtspPort = prefs.getString(RtspServer.PREF_PORT, null)?.toIntOrNull() ?: RtspServer.DEFAULT_PORT
         val rtspEnabled = prefs.getBoolean(RtspServer.PREF_ENABLED, false)
         val onvifPort = prefs.getString("onvif_port", null)?.toIntOrNull() ?: 8000
         val rtspUrls = if (rtspEnabled) {
             "\n$rtspProtocol://$ipAddress:$rtspPort${RtspServer.PATH} (& ${RtspServer.SUB_PATH})" +
-                "\nONVIF $protocol://$ipAddress:$onvifPort"
+                "\nONVIF http://$ipAddress:$onvifPort/onvif/device_service"
         } else {
             ""
         }
