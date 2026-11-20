@@ -46,3 +46,10 @@
 - **DEVICE TEST:** отсутствует для .11. После сборки проверить фокус (D) + блокировку 10–30 минут, RTSP client reconnect, TCP `http://<LAN-IP>:8000/onvif/device_service`, `/live` и `/live/sub`, SOAP Imaging/Relay/Media и vendor health events. Не открывать anonymous ONVIF/RTSP порты в Internet.
 - Устранение дрейфа фокуса, вызванного самой прошивкой или физической потерей HAL при screen lock, ещё не доказано; тест `CameraSession.serves` проверяет логику приложения, а не железо.
 - Подробный инженерный handoff: `main/docs/workstreams/onvif-20261120-h872-focus-transport-quality-telemetry.md`. Пользовательский ZIP остаётся приватным.
+
+
+### 2026-11-20 — final source audit / availability recheck
+- **Current PR #8 code HEAD:** `eb6e0289d1179bebc759a70614aabe4509d4dbda`. Последний изменённый Kotlin источник: `OnvifServer.kt` теперь размещает `DeviceCapabilities.IO` **перед** `Security` согласно порядку XML schema, чтобы NVR обнаруживал 1 relay torch0 и не отвергал GetCapabilities из-за неверного порядка. Это дополнительный функциональный коммит поверх предыдущего SHA; старые CI, если появятся, надо сверять с текущим HEAD.
+- Проверено через Github API: `actions/runs?branch=fix/lg-g6-focus-onvif-lifecycle-20261120` вернул `total_count=0` **после** source commits и PR #8; CI не запускался и не опубликован APK .11. Причину отсутствия запуска API не показывает; не предполагать ни квоты, ни неисправность репозитория без доказательства.
+- Дополнительный тест `scripts/test-onvif-transport.cjs` в Android8 workflow проверяет независимый ONVIF HTTP, RTSP auth migration и включённые SOAP команды; `scripts/test-onvif-rtsp-ui.cjs` проверяет реальные селекторы качества.
+- Окончательный статус: **source-implemented / CI-blocked / not device-verified**, PR draft. Следующий исполнитель должен сначала обеспечить GitHub Actions запуск для exact HEAD и исправить возможные ошибки Kotlin/JUnit; только после SUCCESS выдавать APK.
