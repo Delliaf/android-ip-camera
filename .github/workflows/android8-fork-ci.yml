@@ -77,6 +77,7 @@ jobs:
           node scripts/test-metrics-dashboard.cjs
           node scripts/test-web-controls.cjs
           node scripts/test-lg-isp-ui.cjs
+          node scripts/test-onvif-rtsp-ui.cjs
 
       - name: Test and build debug APK (retry transient dependency failures)
         run: |
