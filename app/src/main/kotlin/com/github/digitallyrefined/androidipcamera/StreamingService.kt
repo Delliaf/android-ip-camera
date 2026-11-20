@@ -500,7 +500,8 @@ class StreamingService : LifecycleService() {
     }
 
     fun setPreviewSurface(surfaceProvider: Preview.SurfaceProvider?) {
-        if (currentSurfaceProvider === surfaceProvider) return
+        if (currentSurfaceProvider === surfaceProvider &&
+            captureRunning && cameraDelivering()) return
         currentSurfaceProvider = surfaceProvider
         // A pinned H.264 session is already headless; changing the Activity
         // surface on lock/unlock MUST NOT destroy the Camera2/encoder session.
