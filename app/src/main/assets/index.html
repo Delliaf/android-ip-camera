@@ -606,10 +606,26 @@
               <button id="modeMjpegBtn" class="btn btn-action" style="width: 49%;">MJPEG</button>
             </div>
 
-            <label for="streamBitrateKbps">Main H.264 / RTSP bitrate</label>
+            <label for="onvifVideoQuality">RTSP / ONVIF main video quality preset (shared H.264 encoder)</label>
+            <select id="onvifVideoQuality" data-control="onvif_video_quality">
+              <option value="1">1 · Economy (1 Mbps)</option>
+              <option value="2">2 · Balanced low (3 Mbps)</option>
+              <option value="3">3 · Balanced (6 Mbps)</option>
+              <option value="4">4 · High (12 Mbps)</option>
+              <option value="5">5 · Maximum preset (24 Mbps)</option>
+            </select>
+            <small>ONVIF and RTSP share a single H.264 main encoder: this preset changes
+              its bitrate, not a separate ONVIF image. Use the explicit bitrate below
+              for precise control. Both require a short encoder restart.</small>
+            <label for="streamBitrateKbps">Actual main RTSP / ONVIF H.264 bitrate</label>
             <select id="streamBitrateKbps" data-control="stream_bitrate_kbps">
               <option value="auto">Auto (encoder dependent)</option>
+              <option value="1000">1 Mbps</option>
               <option value="2000">2 Mbps</option>
+              <option value="3000">3 Mbps</option>
+              <option value="6000">6 Mbps</option>
+              <option value="12000">12 Mbps</option>
+              <option value="24000">24 Mbps</option>
               <option value="5000">5 Mbps</option>
               <option value="10000">10 Mbps</option>
               <option value="20000">20 Mbps</option>
@@ -811,8 +827,11 @@
             <input id="contrast" type='range' min='-50' max='50' step='10' value='0' data-control='contrast'
               data-badge='contVal'>
 
-            <label for="fps">Frame Rate (fps)</label>
+            <label for="fps">RTSP / ONVIF main H.264 requested FPS</label>
             <input id="fps" type='number' min='1' max='60' value='30' data-control='fps'>
+            <small>Actual camera FPS may drop below this value under long-exposure
+              auto-ISO/night modes. ONVIF GetVideoEncoderConfiguration reflects this
+              requested encoder setting, not the physical sensor throughput.</small>
 
             <div style="margin-top:12px;">
               <button id="resetDefaultsBtn" class="btn" style="width:100%;">Reset to defaults</button>
