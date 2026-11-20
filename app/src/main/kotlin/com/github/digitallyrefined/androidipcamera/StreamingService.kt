@@ -491,7 +491,9 @@ class StreamingService : LifecycleService() {
      */
     private fun holdCameraForRtsp(): Boolean {
         val prefs = PreferenceManager.getDefaultSharedPreferences(this)
-        return LgG6Main0Profile.isTarget(camId()) &&
+        val main0 = LgG6Main0Profile.isTarget(camId()) ||
+            (LgG6Main0Profile.isDevice() && selectedCameraId == null && !frontFacing)
+        return main0 &&
             prefs.getBoolean("lg_main0_background_hold", true) &&
             prefs.getBoolean(RtspServer.PREF_ENABLED, false)
     }
@@ -1462,9 +1464,39 @@ class StreamingService : LifecycleService() {
                     // cameraserver down with it, a start without frames says nothing about Camera2.
                     if (framed || !Camera1Capture.unsettled(CAMERA1_SETTLE_MS)) recordCameraXFrames(prefs, camera, framed)
                     if (!framed) {
-                        Log.w(TAG, "CameraX bound but no frames within ${CAMERAX_FRAME_GRACE_MS}ms, falling back to Camera1")
+                        Log.w(TAG, "CameraX bound but no frames within ${CAMERAX_FRAME_GRACE_MS}ms")
                         stopCamera()
-                        startCamera1Backend(want, demand)
+                        // LG-H872 Camera1 cannot set lens diopters. Retain a manual
+                        // focus lock by trying the proven Direct Camera2 PRIVATE
+                        // path *before* accepting Camera1's continuous-video AF.
+                        val tryDirect = LgG6Main0Profile.isTarget(camera) && demand.h264 &&
+                            !demand.mjpegViewers && !demand.motion &&
+                            !demand.snapshot && !demand.screenPreview
+                        var directWorked = false
+                        if (tryDirect) {
+                            try {
+                                // 960x720 PRIVATE is actually observed in H872 logs;
+                                // unlike 4160x3120 CameraX YUV it has been stable.
+                                startLgMain0DirectBackend(want, want)
+                                val direct = backend as? LgG6Main0DirectCapture
+                                var waited = 0L
+                                while (direct != null && !direct.failed &&
+                                    direct.lastFrameAtMs <= 0L && waited < 5000L) {
+                                    kotlinx.coroutines.delay(100)
+                                    waited += 100L
+                                }
+                                directWorked = direct != null && !direct.failed &&
+                                    direct.lastFrameAtMs > 0L
+                                if (!directWorked) stopCamera()
+                            } catch (e: Exception) {
+                                Log.w(TAG, "Camera0 Direct fallback unavailable: ${e.message}")
+                                stopCamera()
+                            }
+                        }
+                        if (!directWorked) {
+                            Log.w(TAG, "Camera0 falling back to Camera1; exact manual diopters unavailable")
+                            startCamera1Backend(want, demand)
+                        }
                     }
                 }
             }
