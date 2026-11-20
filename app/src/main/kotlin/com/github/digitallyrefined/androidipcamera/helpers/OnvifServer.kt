@@ -685,12 +685,25 @@ class OnvifServer(
                 val t = OnvifXml.text(op, "ConfigurationToken")?.removePrefix("vec_") ?: "main"
                 "<trt:GetVideoEncoderConfigurationResponse>${videoEncoderConfig(if (t in profileTokens()) t else "main", "trt:Configuration")}</trt:GetVideoEncoderConfigurationResponse>"
             }
-            "GetVideoEncoderConfigurationOptions" -> "<trt:GetVideoEncoderConfigurationOptionsResponse><trt:Options>" +
-                "<tt:QualityRange><tt:Min>1</tt:Min><tt:Max>5</tt:Max></tt:QualityRange>" +
-                "<tt:H264><tt:ResolutionsAvailable><tt:Width>${s.width}</tt:Width><tt:Height>${s.height}</tt:Height></tt:ResolutionsAvailable>" +
-                "<tt:GovLengthRange><tt:Min>1</tt:Min><tt:Max>300</tt:Max></tt:GovLengthRange><tt:FrameRateRange><tt:Min>1</tt:Min><tt:Max>${s.fps.coerceAtLeast(1)}</tt:Max></tt:FrameRateRange>" +
-                "<tt:EncodingIntervalRange><tt:Min>1</tt:Min><tt:Max>1</tt:Max></tt:EncodingIntervalRange><tt:H264ProfilesSupported>Main</tt:H264ProfilesSupported></tt:H264>" +
-                "</trt:Options></trt:GetVideoEncoderConfigurationOptionsResponse>"
+            "GetVideoEncoderConfigurationOptions" -> {
+                val selected = OnvifXml.text(op, "ConfigurationToken")?.removePrefix("vec_") ?: "main"
+                if (selected !in profileTokens()) return fault("ter:InvalidArgVal", "Unknown encoder token")
+                val sub = selected == "sub"
+                val width = if (sub) s.subWidth else s.width
+                val height = if (sub) s.subHeight else s.height
+                val rangeMin = if (sub) 300 else 250
+                val rangeMax = if (sub) 2000 else 80000
+                val upperFps = if (sub) 30 else 60
+                "<trt:GetVideoEncoderConfigurationOptionsResponse><trt:Options>" +
+                    "<tt:QualityRange><tt:Min>1</tt:Min><tt:Max>5</tt:Max></tt:QualityRange>" +
+                    "<tt:H264><tt:ResolutionsAvailable><tt:Width>$width</tt:Width><tt:Height>$height</tt:Height></tt:ResolutionsAvailable>" +
+                    "<tt:GovLengthRange><tt:Min>1</tt:Min><tt:Max>300</tt:Max></tt:GovLengthRange>" +
+                    "<tt:FrameRateRange><tt:Min>1</tt:Min><tt:Max>$upperFps</tt:Max></tt:FrameRateRange>" +
+                    "<tt:BitrateRange><tt:Min>$rangeMin</tt:Min><tt:Max>$rangeMax</tt:Max></tt:BitrateRange>" +
+                    "<tt:EncodingIntervalRange><tt:Min>1</tt:Min><tt:Max>1</tt:Max></tt:EncodingIntervalRange>" +
+                    "<tt:H264ProfilesSupported>Main</tt:H264ProfilesSupported></tt:H264>" +
+                    "</trt:Options></trt:GetVideoEncoderConfigurationOptionsResponse>"
+            }
             "SetVideoEncoderConfiguration" -> {
                 setEncoderConfiguration(op)?.let { return it }
                 "<trt:SetVideoEncoderConfigurationResponse/>"
@@ -749,12 +762,19 @@ class OnvifServer(
         "GetVideoSourceConfigurations" -> "<tr2:GetVideoSourceConfigurationsResponse>${videoSourceConfig("tr2:Configurations")}</tr2:GetVideoSourceConfigurationsResponse>"
         "GetVideoEncoderConfigurationOptions" -> {
             val s = stream()
-            val fps = s.fps.coerceAtLeast(1)
-            "<tr2:GetVideoEncoderConfigurationOptionsResponse><tr2:Options GovLengthRange=\"1 300\" FrameRatesSupported=\"$fps\" " +
+            val token = OnvifXml.text(op, "ConfigurationToken")?.removePrefix("vec_") ?: "main"
+            if (token !in profileTokens()) return fault("ter:InvalidArgVal", "Unknown encoder token")
+            val sub = token == "sub"
+            val width = if (sub) s.subWidth else s.width
+            val height = if (sub) s.subHeight else s.height
+            val upperFps = if (sub) 30 else 60
+            val bitrateMin = if (sub) 300 else 250
+            val bitrateMax = if (sub) 2000 else 80000
+            "<tr2:GetVideoEncoderConfigurationOptionsResponse><tr2:Options GovLengthRange=\"1 300\" FrameRatesSupported=\"$upperFps\" " +
                 "ProfilesSupported=\"Main\" ConstantBitRateSupported=\"false\" GuaranteedInstances=\"2\">" +
                 "<tt:Encoding>H264</tt:Encoding><tt:QualityRange><tt:Min>1</tt:Min><tt:Max>5</tt:Max></tt:QualityRange>" +
-                "<tt:ResolutionsAvailable><tt:Width>${s.width}</tt:Width><tt:Height>${s.height}</tt:Height></tt:ResolutionsAvailable>" +
-                "<tt:BitrateRange><tt:Min>${(s.bitrateKbps / 4).coerceAtLeast(64)}</tt:Min><tt:Max>${s.bitrateKbps * 2}</tt:Max></tt:BitrateRange>" +
+                "<tt:ResolutionsAvailable><tt:Width>$width</tt:Width><tt:Height>$height</tt:Height></tt:ResolutionsAvailable>" +
+                "<tt:BitrateRange><tt:Min>$bitrateMin</tt:Min><tt:Max>$bitrateMax</tt:Max></tt:BitrateRange>" +
                 "</tr2:Options></tr2:GetVideoEncoderConfigurationOptionsResponse>"
         }
         "SetVideoEncoderConfiguration" -> {
