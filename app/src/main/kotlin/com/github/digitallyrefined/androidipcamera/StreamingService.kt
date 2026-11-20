@@ -282,6 +282,12 @@ class StreamingService : LifecycleService() {
             return
         }
         val prefs = PreferenceManager.getDefaultSharedPreferences(this)
+        if (!prefs.contains("rtsp_auth_enabled")) {
+            // Migrate existing installations without weakening RTSP protection
+            // or unexpectedly turning on auth for users who opted out.
+            prefs.edit().putBoolean("rtsp_auth_enabled",
+                prefs.getBoolean("enable_auth", true)).apply()
+        }
         // Earlier versions kept "camera2_unusable" forever after one CameraX start without frames, which
         // pinned capable phones to Camera1. Drop it so the next frame-needing start tests CameraX again.
         if (prefs.contains(CameraXFallback.LEGACY_PREF)) prefs.edit().remove(CameraXFallback.LEGACY_PREF).apply()
