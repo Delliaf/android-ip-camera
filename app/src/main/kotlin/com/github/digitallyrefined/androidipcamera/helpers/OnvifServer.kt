@@ -213,6 +213,14 @@ class OnvifServer(
         remoteHost.set(sock.inetAddress?.hostAddress ?: "?")
         openSockets += sock
         try {
+            // Anonymous ONVIF exposes camera controls; LAN only, even if
+            // the device is on a public interface or a port is forwarded.
+            val address = sock.inetAddress
+            if (credentials() == null && !address.isLoopbackAddress &&
+                !address.isSiteLocalAddress && !address.isLinkLocalAddress) {
+                onLog("SECURITY: blocked anonymous ONVIF client outside LAN")
+                return
+            }
             sock.soTimeout = 30_000
             sock.tcpNoDelay = true
             val input = BufferedInputStream(sock.getInputStream())
