@@ -88,8 +88,8 @@
         <CheckBoxPreference
             android:key="rtsp_auth_enabled"
             android:title="Require RTSP authentication"
-            android:summary="OFF for local go2rtc/NVR rtsp://. Independent from Web and ONVIF authentication. When ON, uses the securely stored username/password. Never forward an unauthenticated RTSP port to the Internet."
-            android:defaultValue="false" />
+            android:summary="Independent from Web and ONVIF. OFF permits anonymous RTSP only from LAN/loopback; never forward RTSP port to Internet. Existing installations keep their previous protection until this switch is changed."
+            android:defaultValue="true" />
         <CheckBoxPreference
             android:key="rtsp_tls_enabled"
             android:title="RTSP over TLS (RTSPS)"
