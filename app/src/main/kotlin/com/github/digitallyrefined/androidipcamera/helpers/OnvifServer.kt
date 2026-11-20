@@ -580,6 +580,68 @@ class OnvifServer(
         "<$tag token=\"$token\" fixed=\"true\"><tt:Name>${if (token == "main") "MainStream" else "SubStream"}</tt:Name>" +
             videoSourceConfig() + videoEncoderConfig(token) + "</$tag>"
 
+    /**
+     * ONVIF Media/Media2 video configuration, with real forwarding to the
+     * shared RTSP encoder. No fake success for unsupported codec/resolution.
+     * The substream is a separate encoder; its supported sizes/bitrates are
+     * intentionally constrained to values accepted by our RTSP implementation.
+     */
+    private fun setEncoderConfiguration(op: Element): String? {
+        val config = OnvifXml.find(op, "Configuration")
+            ?: return fault("ter:InvalidArgVal", "Missing video encoder Configuration")
+        val token = config.getAttribute("token").ifBlank {
+            OnvifXml.text(op, "ConfigurationToken") ?: "vec_main"
+        }.removePrefix("vec_")
+        if (token !in profileTokens()) return fault("ter:InvalidArgVal", "Unknown encoder $token")
+        val current = stream()
+        val sub = token == "sub"
+        val oldWidth = if (sub) current.subWidth else current.width
+        val oldHeight = if (sub) current.subHeight else current.height
+        val oldFps = if (sub) current.subFps else current.fps
+        val oldBitrate = if (sub) current.subBitrateKbps else current.bitrateKbps
+        val encoding = OnvifXml.text(config, "Encoding")
+        if (encoding != null && encoding.uppercase() != "H264")
+            return fault("ter:ActionNotSupported", "Only H264 is supported")
+        val width = OnvifXml.text(config, "Width")?.toIntOrNull() ?: oldWidth
+        val height = OnvifXml.text(config, "Height")?.toIntOrNull() ?: oldHeight
+        if (width != oldWidth || height != oldHeight)
+            return fault("ter:ActionNotSupported",
+                "Changing resolution from ONVIF is not supported; choose RTSP resolution in web controls")
+        val fpsText = OnvifXml.text(config, "FrameRateLimit")
+        val bitrateText = OnvifXml.text(config, "BitrateLimit")
+        val qualityText = OnvifXml.text(config, "Quality")
+        val fps = fpsText?.toIntOrNull() ?: oldFps
+        val bitrate = bitrateText?.toIntOrNull() ?: oldBitrate
+        val quality = qualityText?.toFloatOrNull() ?: current.quality.toFloat()
+        if (fps !in 1..60 || bitrate !in 250..80_000 ||
+            !quality.isFinite() || quality !in 1f..5f)
+            return fault("ter:InvalidArgVal", "Invalid encoder fps/bitrate/quality")
+        if (sub) {
+            if (fps !in listOf(10, 15, 20, 30) || bitrate !in listOf(300, 500, 800, 1200, 2000))
+                return fault("ter:ActionNotSupported",
+                    "Substream supports FPS 10/15/20/30 and bitrate 300/500/800/1200/2000 kbps")
+            if (fpsText != null && !cameraControl("rtsp_sub_fps", fps.toString()))
+                return fault("ter:Action", "Could not set substream FPS")
+            if (bitrateText != null && !cameraControl("rtsp_sub_bitrate", bitrate.toString()))
+                return fault("ter:Action", "Could not set substream bitrate")
+            if (qualityText != null && bitrateText == null) {
+                val preset = listOf(300, 500, 800, 1200, 2000)[quality.toInt().coerceIn(1, 5) - 1]
+                if (!cameraControl("rtsp_sub_bitrate", preset.toString()))
+                    return fault("ter:Action", "Could not set substream quality")
+            }
+        } else {
+            // Apply quality first, explicit bitrate wins when both are supplied.
+            if (qualityText != null && !cameraControl("onvif_video_quality",
+                    quality.toInt().coerceIn(1, 5).toString()))
+                return fault("ter:Action", "Could not set video quality")
+            if (fpsText != null && !cameraControl("fps", fps.toString()))
+                return fault("ter:Action", "Could not set video FPS")
+            if (bitrateText != null && !cameraControl("stream_bitrate_kbps", bitrate.toString()))
+                return fault("ter:Action", "Could not set video bitrate")
+        }
+        return null // accepted and dispatched to service; camera encoder restarts asynchronously.
+    }
+
     private fun profileToken(op: Element): String? = OnvifXml.text(op, "ProfileToken")
 
     private fun streamUri(token: String = "main"): String {
@@ -615,9 +677,12 @@ class OnvifServer(
                 "<tt:GovLengthRange><tt:Min>1</tt:Min><tt:Max>300</tt:Max></tt:GovLengthRange><tt:FrameRateRange><tt:Min>1</tt:Min><tt:Max>${s.fps.coerceAtLeast(1)}</tt:Max></tt:FrameRateRange>" +
                 "<tt:EncodingIntervalRange><tt:Min>1</tt:Min><tt:Max>1</tt:Max></tt:EncodingIntervalRange><tt:H264ProfilesSupported>Main</tt:H264ProfilesSupported></tt:H264>" +
                 "</trt:Options></trt:GetVideoEncoderConfigurationOptionsResponse>"
-            "SetVideoEncoderConfiguration" -> "<trt:SetVideoEncoderConfigurationResponse/>"
+            "SetVideoEncoderConfiguration" -> {
+                setEncoderConfiguration(op)?.let { return it }
+                "<trt:SetVideoEncoderConfigurationResponse/>"
+            }
             "GetGuaranteedNumberOfVideoEncoderInstances" -> "<trt:GetGuaranteedNumberOfVideoEncoderInstancesResponse><trt:TotalNumber>2</trt:TotalNumber><trt:H264>2</trt:H264></trt:GetGuaranteedNumberOfVideoEncoderInstancesResponse>"
-            "GetStreamUri" -> "<trt:GetStreamUriResponse><trt:MediaUri><tt:Uri>${e(streamUri())}</tt:Uri>" +
+            "GetStreamUri" -> "<trt:GetStreamUriResponse><trt:MediaUri><tt:Uri>${e(streamUri(profileToken(op) ?: "main"))}</tt:Uri>" +
                 "<tt:InvalidAfterConnect>false</tt:InvalidAfterConnect><tt:InvalidAfterReboot>false</tt:InvalidAfterReboot><tt:Timeout>PT0S</tt:Timeout></trt:MediaUri></trt:GetStreamUriResponse>"
             "GetSnapshotUri" -> if (snapshot == null) fault("ter:ActionNotSupported", "No snapshot") else
                 "<trt:GetSnapshotUriResponse><trt:MediaUri><tt:Uri>${e(baseUrl())}/onvif/snapshot.jpg</tt:Uri>" +
@@ -671,12 +736,13 @@ class OnvifServer(
                 "<tt:BitrateRange><tt:Min>${(s.bitrateKbps / 4).coerceAtLeast(64)}</tt:Min><tt:Max>${s.bitrateKbps * 2}</tt:Max></tt:BitrateRange>" +
                 "</tr2:Options></tr2:GetVideoEncoderConfigurationOptionsResponse>"
         }
-        // The stream is fixed by the app's own settings; accept (and ignore) client tuning so
-        // NVRs that "auto-configure" the encoder don't treat the camera as broken.
-        "SetVideoEncoderConfiguration" -> "<tr2:SetVideoEncoderConfigurationResponse/>"
+        "SetVideoEncoderConfiguration" -> {
+            setEncoderConfiguration(op)?.let { return it }
+            "<tr2:SetVideoEncoderConfigurationResponse/>"
+        }
         "GetVideoEncoderInstances" -> "<tr2:GetVideoEncoderInstancesResponse><tr2:Info><tr2:Codec><tr2:Encoding>H264</tr2:Encoding><tr2:Number>2</tr2:Number></tr2:Codec><tr2:Total>2</tr2:Total></tr2:Info></tr2:GetVideoEncoderInstancesResponse>"
         "GetVideoEncoderConfigurations" -> "<tr2:GetVideoEncoderConfigurationsResponse>${profileTokens().joinToString("") { media2EncoderConfig(it, "tr2:Configurations") }}</tr2:GetVideoEncoderConfigurationsResponse>"
-        "GetStreamUri" -> "<tr2:GetStreamUriResponse><tr2:Uri>${e(streamUri())}</tr2:Uri></tr2:GetStreamUriResponse>"
+        "GetStreamUri" -> "<tr2:GetStreamUriResponse><tr2:Uri>${e(streamUri(OnvifXml.text(op, "ProfileToken") ?: "main"))}</tr2:Uri></tr2:GetStreamUriResponse>"
         "GetSnapshotUri" -> if (snapshot == null) fault("ter:ActionNotSupported", "No snapshot")
             else "<tr2:GetSnapshotUriResponse><tr2:Uri>${e(baseUrl())}/onvif/snapshot.jpg</tr2:Uri></tr2:GetSnapshotUriResponse>"
         "GetAudioSourceConfigurations", "GetAudioEncoderConfigurations", "GetMetadataConfigurations", "GetAnalyticsConfigurations" ->
