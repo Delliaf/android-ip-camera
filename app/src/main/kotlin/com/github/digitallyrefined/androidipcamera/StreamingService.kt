@@ -75,6 +75,7 @@ class StreamingService : LifecycleService() {
     private var rtspServer: RtspServer? = null
     /** Optional ONVIF service (Settings > ONVIF) advertising the RTSP stream and motion events. */
     @Volatile private var onvifServer: OnvifServer? = null
+    private val onvifPerformanceMonitor by lazy { DevicePerformanceMonitor(this) }
     private var multicastLock: android.net.wifi.WifiManager.MulticastLock? = null
     /** Motion detection over the capture frames already delivered to the streaming pipeline. */
     private var motionMonitor: MotionMonitor? = null
@@ -837,10 +838,25 @@ class StreamingService : LifecycleService() {
                 val size = desiredSize()
                 val fps = (prefs.getString("stream_fps", "30")?.toIntOrNull() ?: 30).coerceIn(1, 60)
                 val scheme = if (prefs.getBoolean("rtsp_tls_enabled", false)) "rtsps" else "rtsp"
+                val shortEdge = minOf(size.width, size.height).coerceAtLeast(1)
+                val subShort = (prefs.getString(RtspServer.PREF_SUB_SIZE, "360")
+                    ?.toIntOrNull() ?: 360).coerceIn(240, 720)
+                fun evenSize(n: Int) = (n.coerceAtLeast(2) / 2) * 2
+                val subWidth = evenSize(size.width * subShort / shortEdge)
+                val subHeight = evenSize(size.height * subShort / shortEdge)
                 OnvifStreamInfo(
                     rtspUrl = "$scheme://${getLocalIpAddress()}:$rtspPort${RtspServer.PATH}",
                     width = size.width, height = size.height, fps = fps,
                     bitrateKbps = H264HardwareEncoder.bitrateFor(size.width, size.height, mainBitrateKbps()) / 1000,
+                    quality = (prefs.getString("onvif_video_quality", "5")
+                        ?.toIntOrNull() ?: 5).coerceIn(1, 5),
+                    subWidth = subWidth,
+                    subHeight = subHeight,
+                    subFps = (prefs.getString(RtspServer.PREF_SUB_FPS, "15")
+                        ?.toIntOrNull() ?: 15).coerceIn(1, 30),
+                    subBitrateKbps = (prefs.getString(RtspServer.PREF_SUB_BITRATE, "500")
+                        ?.toIntOrNull() ?: 500).coerceIn(250, 2000),
+                    subRtspUrl = "$scheme://${getLocalIpAddress()}:$rtspPort${RtspServer.SUB_PATH}"
                 )
             },
             // ONVIF credentials are opt-in and INDEPENDENT of the Web/RTSP
@@ -852,6 +868,58 @@ class StreamingService : LifecycleService() {
             // Snapshots use the regular still-capture path, so they work whether or not a
             // stream is running (a snapshot opens the camera on demand and restores the stream).
             snapshot = { snapshot(camId()) },
+            cameraStatus = {
+                val perf = onvifPerformanceMonitor.sample()
+                val st = PreferenceManager.getDefaultSharedPreferences(this)
+                val focusOnMain = LgG6Main0Profile.isTarget(camId())
+                val maxDiopters = try {
+                    val mgr = getSystemService(Context.CAMERA_SERVICE) as CameraManager
+                    mgr.getCameraCharacteristics("0").get(
+                        CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE) ?: 10f
+                } catch (_: Exception) { 10f }
+                val battery = try {
+                    val state = registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+                    state?.getIntExtra(android.os.BatteryManager.EXTRA_LEVEL, -1)?.takeIf { it >= 0 }
+                } catch (_: Exception) { null }
+                OnvifControlStatus(
+                    focusAvailable = focusOnMain,
+                    focusLocked = focusOnMain &&
+                        st.getString(LgG6Main0Profile.PREF_FOCUS_MODE, "auto") == "diopters",
+                    focusDiopters = st.getString(LgG6Main0Profile.PREF_FOCUS_DIOPTERS, "0.25")
+                        ?.toFloatOrNull()?.coerceIn(0f, maxDiopters) ?: 0.25f,
+                    maxFocusDiopters = maxDiopters,
+                    torchAvailable = anyBackCameraWithFlash(),
+                    torchEnabled = st.getString(PREF_CAMERA_TORCH, "off") == "on",
+                    batteryPercent = battery,
+                    batteryCelsius = perf.batteryTemperatureCelsius,
+                    socCelsius = perf.temperatureCelsius,
+                    cpuPercent = perf.cpuPercent.takeIf { it >= 0 },
+                )
+            },
+            cameraControl = { key, value ->
+                val valid = when (key) {
+                    "lg_main0_focus_mode" -> LgG6Main0Profile.isTarget(camId()) &&
+                        value in listOf("auto", "diopters")
+                    "lg_main0_focus_diopters" -> LgG6Main0Profile.isTarget(camId()) &&
+                        value.toFloatOrNull()?.let { it.isFinite() && it in 0f..10f } == true
+                    "torch" -> value in listOf("on", "off")
+                    "fps" -> value.toIntOrNull() in 1..60
+                    "stream_bitrate_kbps" -> value.toIntOrNull() in 250..80000
+                    "onvif_video_quality" -> value.toIntOrNull() in 1..5
+                    "rtsp_sub_fps" -> value.toIntOrNull() in listOf(10,15,20,30)
+                    "rtsp_sub_bitrate" -> value.toIntOrNull() in listOf(300,500,800,1200,2000)
+                    else -> false
+                }
+                if (!valid || ((key == "fps" || key == "stream_bitrate_kbps" ||
+                        key == "onvif_video_quality") && localRecorder?.isRecording == true)) false
+                else try {
+                    handleRemoteControl(key, value, 0L)
+                    true
+                } catch (e: Exception) {
+                    Log.w(TAG, "ONVIF control ${key} rejected: ${e.message}")
+                    false
+                }
+            },
             onLog = { Log.i(TAG, "ONVIF: $it"); onLog?.invoke("ONVIF: $it") },
             // Standard ONVIF SOAP/WS-Discovery on plain HTTP; legacy saved
             // onvif_tls_enabled=true is intentionally ignored. Web HTTPS and
