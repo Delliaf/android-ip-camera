@@ -199,6 +199,47 @@ class Camera1Capture private constructor(private val cameraId: Int, targetW: Int
         }
     }
 
+    /**
+     * The legacy Camera1 API cannot request an absolute lens position in diopters.
+     * But a one-shot AUTO focus can HOLD its achieved lens position without switching
+     * back to CONTINUOUS_VIDEO. Previously LG manual focus was silently ignored
+     * on CameraX timeout -> Camera1 fallback, restoring wandering continuous AF.
+     * A nonzero diopter value is a LOCK REQUEST, not an exact distance on Camera1.
+     */
+    override fun setFocusDiopters(diopters: Float?) {
+        if (stopped) return
+        if (diopters == null) {
+            setManualFocus(-1f)
+            return
+        }
+        val d = diopters.takeIf { it.isFinite() }?.coerceAtLeast(0f) ?: return
+        try {
+            val p = camera.parameters
+            val modes = p.supportedFocusModes.orEmpty()
+            if (d <= 0.001f && modes.contains(Camera.Parameters.FOCUS_MODE_INFINITY)) {
+                p.focusMode = Camera.Parameters.FOCUS_MODE_INFINITY
+                camera.parameters = p
+                Log.i(TAG, "Camera1 autofocus disabled: infinite lens focus")
+            } else if (modes.contains(Camera.Parameters.FOCUS_MODE_AUTO)) {
+                // Camera1 single-shot AF remains locked until next explicit AF
+                // or changes to focus mode; it is not the caller's requested D.
+                p.focusMode = Camera.Parameters.FOCUS_MODE_AUTO
+                camera.parameters = p
+                camera.autoFocus { success, _ ->
+                    Log.i(TAG, "Camera1 requested manual $d D unavailable; one-shot focus lock success=$success")
+                }
+            } else if (modes.contains(Camera.Parameters.FOCUS_MODE_FIXED)) {
+                p.focusMode = Camera.Parameters.FOCUS_MODE_FIXED
+                camera.parameters = p
+                Log.w(TAG, "Camera1 has only fixed lens, exact $d D unavailable")
+            } else {
+                Log.w(TAG, "Camera1 cannot lock focus; no AUTO/FIXED modes reported")
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Camera1 best-effort focus lock failed: ${e.message}")
+        }
+    }
+
     private fun live(block: (Camera.Parameters) -> Unit) {
         if (stopped) return
         try { val p = camera.parameters; block(p); camera.parameters = p } catch (_: Exception) {}
