@@ -1,0 +1,117 @@
+# A reusable builder on the default branch: experimental stacked PRs need
+# an independently runnable source ref even when their own push events do not
+# produce Actions runs. Creating/updating THIS workflow on main builds the
+# current LG-H872 PR8 branch once; future builds use workflow_dispatch.
+name: LG H872 Experimental ARM64 APK
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/h872-experimental-apk.yml'
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: 'Branch or commit to compile (must exist in this repository)'
+        required: true
+        default: 'fix/lg-g6-focus-onvif-lifecycle-20261120'
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: h872-experimental-${{ github.ref }}-${{ github.event.inputs.source_ref || 'pr8-initial' }}
+  cancel-in-progress: false
+
+jobs:
+  build-arm64:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - name: Check out exact experimental branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.source_ref || 'fix/lg-g6-focus-onvif-lifecycle-20261120' }}
+          persist-credentials: false
+
+      - name: Record the exact checked-out source SHA
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rev-parse HEAD | tee source-sha.txt
+          git log -1 --format='%s'
+          test -e app/build.gradle
+          grep -E 'version(Code|Name)' app/build.gradle
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools'
+
+      - name: Install Android 34 platform, build tools and NDK
+        run: |
+          sdkmanager "platforms;android-34" "build-tools;34.0.0" "ndk;27.2.12479018"
+
+      - name: Set up ARM64 Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - name: Validate actual in-APK browser code and its integration tests
+        run: |
+          python3 - <<'PY'
+          import pathlib, re
+          content = pathlib.Path("app/src/main/assets/index.html").read_text(encoding="utf-8")
+          match = re.search(r"<script>(.*?)</script>", content, re.DOTALL | re.IGNORECASE)
+          assert match, "Dashboard JavaScript missing"
+          pathlib.Path("/tmp/lg-camera-dashboard.js").write_text(match.group(1), encoding="utf-8")
+          PY
+          node --check /tmp/lg-camera-dashboard.js
+          node scripts/test-metrics-dashboard.cjs
+          node scripts/test-web-controls.cjs
+          node scripts/test-lg-isp-ui.cjs
+          node scripts/test-onvif-rtsp-ui.cjs
+          node scripts/test-onvif-transport.cjs
+
+      - name: Kotlin unit tests and build debug APK
+        run: |
+          chmod +x ./gradlew
+          bash scripts/ci-gradle-retry.sh :app:testDebugUnitTest :app:assembleDebug --no-daemon --max-workers=2
+
+      - name: Inspect APK architectures, version and integrity
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          apks=(app/build/outputs/apk/debug/*.apk)
+          test "${#apks[@]}" -eq 1
+          apk="${apks[0]}"
+          unzip -Z1 "$apk" > apk-entries.txt
+          grep -q '^lib/arm64-v8a/' apk-entries.txt
+          if grep '^lib/' apk-entries.txt | grep -Ev '^lib/arm64-v8a/'; then
+            echo "ERROR: Found a non-arm64 JNI library" >&2
+            exit 1
+          fi
+          sha256sum "$apk" | tee apk-sha256.txt
+          echo "Source SHA $(cat source-sha.txt) verified, APK ARM64-only"
+
+      - name: Upload fresh experimental APK and source metadata
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lg-h872-experimental-arm64-debug
+          path: |
+            app/build/outputs/apk/debug/*.apk
+            source-sha.txt
+            apk-sha256.txt
+          if-no-files-found: error
+          retention-days: 14
