@@ -10,8 +10,8 @@ assert(service.includes('getBoolean("onvif_auth_enabled", false)'),
   'ONVIF auth independent of global web auth');
 assert(service.includes('getBoolean("rtsp_tls_enabled", false)'),
   'RTSP TLS must be separately configurable');
-assert(service.includes('getBoolean("rtsp_auth_enabled"'),
-  'RTSP auth must be separately configurable');
+assert(rtsp.includes('getBoolean("rtsp_auth_enabled"'),
+  'RTSP auth must be separately configurable in AndroidRtspHost');
 assert(service.includes('if (!prefs.contains("rtsp_auth_enabled"))'),
   'Preserve previous RTSP auth behavior through migration');
 assert(rtsp.includes('rtsp_auth_enabled') && !rtsp.includes('if (!prefs.getBoolean("enable_auth", true))'),
