@@ -298,7 +298,11 @@ class StreamingService : LifecycleService() {
             }
         } else {
             frontFacing = false
-            selectedCameraId = null
+            // Android8 LG-H872 Main0 should use the actual Camera2 ID rather
+            // than logical "back" on cold start. The latter bypasses the
+            // Direct Camera2 fallback/locked-focus policy and pins Camera1.
+            selectedCameraId = if (LgG6Main0Profile.isDevice())
+                LgG6Main0Profile.CAMERA_ID else null
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             registerReceiver(notificationChannelReceiver,
