@@ -2,6 +2,7 @@
 # an independently runnable source ref even when their own push events do not
 # produce Actions runs. Creating/updating THIS workflow on main builds the
 # current LG-H872 PR8 branch once; future builds use workflow_dispatch.
+# Retry 2: source SHA moved to 683ad39 after correcting the RTSP auth test target.
 name: LG H872 Experimental ARM64 APK
 
 on:
