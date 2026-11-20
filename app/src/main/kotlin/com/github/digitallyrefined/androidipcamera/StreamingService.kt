@@ -903,11 +903,12 @@ class StreamingService : LifecycleService() {
                     "lg_main0_focus_diopters" -> LgG6Main0Profile.isTarget(camId()) &&
                         value.toFloatOrNull()?.let { it.isFinite() && it in 0f..10f } == true
                     "torch" -> value in listOf("on", "off")
-                    "fps" -> value.toIntOrNull() in 1..60
-                    "stream_bitrate_kbps" -> value.toIntOrNull() in 250..80000
-                    "onvif_video_quality" -> value.toIntOrNull() in 1..5
-                    "rtsp_sub_fps" -> value.toIntOrNull() in listOf(10,15,20,30)
-                    "rtsp_sub_bitrate" -> value.toIntOrNull() in listOf(300,500,800,1200,2000)
+                    "fps" -> value.toIntOrNull()?.let { it in 1..60 } == true
+                    "stream_bitrate_kbps" -> value.toIntOrNull()?.let { it in 250..80000 } == true
+                    "onvif_video_quality" -> value.toIntOrNull()?.let { it in 1..5 } == true
+                    "rtsp_sub_fps" -> value.toIntOrNull()?.let { it in listOf(10,15,20,30) } == true
+                    "rtsp_sub_bitrate" -> value.toIntOrNull()?.let {
+                        it in listOf(300,500,800,1200,2000) } == true
                     else -> false
                 }
                 if (!valid || ((key == "fps" || key == "stream_bitrate_kbps" ||
@@ -2716,6 +2717,23 @@ class StreamingService : LifecycleService() {
                     edit.putString("${key}_$physicalId", n.toString())
                 edit.apply()
                 launchMain { applyRoiToPipes() }
+            }
+            "fps" -> {
+                val n = value.toIntOrNull()?.takeIf { it in 1..60 } ?: return
+                prefs.edit().putString("stream_fps", n.toString()).apply()
+                // Previously only MjpegStreamingEncoder persisted FPS; the
+                // active H264/RTSP encoder never reloaded it. Fix for ONVIF
+                // SetVideoEncoderConfiguration AND the web FPS control.
+                if (captureRunning && localRecorder?.isRecording != true) debouncedStartCamera()
+            }
+            "onvif_video_quality" -> {
+                val quality = value.toIntOrNull()?.takeIf { it in 1..5 } ?: return
+                val presetKbps = listOf(1000, 3000, 6000, 12000, 24000)[quality - 1]
+                prefs.edit()
+                    .putString("onvif_video_quality", quality.toString())
+                    .putString("stream_bitrate_kbps", presetKbps.toString())
+                    .apply()
+                if (captureRunning && localRecorder?.isRecording != true) debouncedStartCamera()
             }
             "stream_bitrate_kbps" -> {
                 val kbps = value.toIntOrNull()
