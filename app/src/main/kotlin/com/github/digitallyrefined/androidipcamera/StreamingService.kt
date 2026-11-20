@@ -484,13 +484,31 @@ class StreamingService : LifecycleService() {
         }
     }
 
-    // MainActivity attaches PreviewView here; camera restarts when a surface is set while streaming.
+    /** Opt-in-by-default H872 server-camera pin while RTSP is enabled.
+     * The service (not Activity PreviewView) owns the capture and wake lock.
+     * This trades battery/thermal use for continuity across lock/unlock and
+     * viewer reconnects; users may disable it in Android app settings.
+     */
+    private fun holdCameraForRtsp(): Boolean {
+        val prefs = PreferenceManager.getDefaultSharedPreferences(this)
+        return LgG6Main0Profile.isTarget(camId()) &&
+            prefs.getBoolean("lg_main0_background_hold", true) &&
+            prefs.getBoolean(RtspServer.PREF_ENABLED, false)
+    }
+
     fun setPreviewSurface(surfaceProvider: Preview.SurfaceProvider?) {
+        if (currentSurfaceProvider === surfaceProvider) return
         currentSurfaceProvider = surfaceProvider
-        // Recording owns the camera session: stopping or restarting the camera now would tear
-        // down the encoder and finalize the file, so leave the pipeline alone until it stops.
+        // A pinned H.264 session is already headless; changing the Activity
+        // surface on lock/unlock MUST NOT destroy the Camera2/encoder session.
+        if (captureRunning && holdCameraForRtsp() &&
+            runningSession?.serves(cameraDemand(), streamFps(), camId()) == true) {
+            Log.i(TAG, "LG H872 background session retained on PreviewView detach/attach")
+            return
+        }
         if (localRecorder?.isRecording == true) return
-        val shouldRun = encoders.any { it.hasClients() } || currentSurfaceProvider != null || motionEnabled()
+        val shouldRun = encoders.any { it.hasClients() } ||
+            currentSurfaceProvider != null || motionEnabled() || holdCameraForRtsp()
         if (shouldRun) {
             debouncedStartCamera()
         } else {
@@ -734,6 +752,12 @@ class StreamingService : LifecycleService() {
         streamingServerHelper?.startStreamingServer()
         startRtspServerIfEnabled()
         startOnvifIfEnabled()
+        if (holdCameraForRtsp()) {
+            acquireStreamingWakeLock()
+            launchMain {
+                if (!captureRunning) startCamera(force = true)
+            }
+        }
         // A recording mode other than "off" keeps the camera running with no viewer. Continuous
         // mode also starts the segmented recorder; its first start brings the camera up itself.
         if (motionEnabled()) {
@@ -911,6 +935,14 @@ class StreamingService : LifecycleService() {
                 return@launchMain
             }
             if (!hasActiveClients()) {
+                if (holdCameraForRtsp()) {
+                    // Do not shed H264 into a preview-only CameraX/Camera1
+                    // session on last-client disconnect; manual focus is lost.
+                    acquireStreamingWakeLock()
+                    Log.i(TAG, "LG H872 headless RTSP session retained after last viewer")
+                    updateSubStream()
+                    return@launchMain
+                }
                 // No viewers left: the device may sleep again.
                 releaseStreamingWakeLock()
                 // Reload/idle: keep the LED lit across the session gap before the
@@ -1141,7 +1173,8 @@ class StreamingService : LifecycleService() {
      */
     private suspend fun stopCameraWhenIdle(): Boolean {
         val stopped = cameraMutex.withLock {
-            if (hasActiveClients() || currentSurfaceProvider != null) false else { stopCamera(); true }
+            if (hasActiveClients() || currentSurfaceProvider != null || holdCameraForRtsp())
+                false else { stopCamera(); true }
         }
         if (stopped) Camera1Capture.awaitReleased(CAMERA1_RELEASE_WAIT_MS)
         return stopped
@@ -1149,7 +1182,9 @@ class StreamingService : LifecycleService() {
 
     /** What the viewers, recording, motion detection, a snapshot and the on-phone preview ask of the camera now. */
     private fun cameraDemand() = CameraDemand(
-        h264Viewers = h264StreamingEncoder?.hasClients() == true,
+        // Virtual H264 consumer keeps the SAME encoder/session alive even with
+        // zero RTSP clients, so reconnect and screen lock do not rebind the HAL.
+        h264Viewers = h264StreamingEncoder?.hasClients() == true || holdCameraForRtsp(),
         mjpegViewers = mjpegStreamingEncoder?.hasClients() == true,
         recording = recordingNeeded || localRecorder?.isRecording == true,
         motion = motionEnabled(),
@@ -1325,7 +1360,8 @@ class StreamingService : LifecycleService() {
             return@withLock
         }
         val hasClients = encoders.any { it.hasClients() }
-        if (!force && !hasClients && currentSurfaceProvider == null && !motionEnabled()) {
+        if (!force && !hasClients && currentSurfaceProvider == null &&
+            !motionEnabled() && !holdCameraForRtsp()) {
             Log.i(TAG, "startCamera bypassed: no force, no clients, and preview surface is null")
             return@withLock
         }
