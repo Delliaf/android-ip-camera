@@ -345,7 +345,7 @@ class SettingsActivity : AppCompatActivity() {
             // ONVIF HTTP is isolated from Web HTTPS/RTSPS. The old saved
             // onvif_tls_enabled=true is deliberately ignored by the server.
             for (key in listOf("onvif_auth_enabled", "rtsp_tls_enabled",
-                "lg_main0_background_hold")) {
+                "rtsp_auth_enabled", "lg_main0_background_hold")) {
                 findPreference<androidx.preference.CheckBoxPreference>(key)
                     ?.setOnPreferenceChangeListener { _, _ ->
                         android.os.Handler(android.os.Looper.getMainLooper()).post {
@@ -783,7 +783,7 @@ class SettingsActivity : AppCompatActivity() {
         }
 
         private fun setRtspOptionsVisible(visible: Boolean) {
-            listOf(RtspServer.PREF_PORT, "rtsp_tls_enabled")
+            listOf(RtspServer.PREF_PORT, "rtsp_tls_enabled", "rtsp_auth_enabled")
                 .forEach { findPreference<Preference>(it)?.isVisible = visible }
         }
 
