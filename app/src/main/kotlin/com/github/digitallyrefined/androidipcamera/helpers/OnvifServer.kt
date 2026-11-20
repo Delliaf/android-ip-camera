@@ -715,7 +715,8 @@ class OnvifServer(
             "<tt:Quality>5</tt:Quality></$tag>"
     }
 
-    private fun media2(action: String, op: Element): String? = when (action) {
+    private fun media2(action: String, op: Element): String? {
+        return when (action) {
         "GetServiceCapabilities" -> "<tr2:GetServiceCapabilitiesResponse>${media2ServiceCaps()}</tr2:GetServiceCapabilitiesResponse>"
         "GetProfiles" -> {
             val want = OnvifXml.text(op, "Token")
@@ -749,6 +750,7 @@ class OnvifServer(
             "<tr2:${action}Response/>"
         "SetSynchronizationPoint" -> "<tr2:SetSynchronizationPointResponse/>"
         else -> null
+         }
     }
 
     // ===================================================================== imaging (LG Camera0, real focus)
