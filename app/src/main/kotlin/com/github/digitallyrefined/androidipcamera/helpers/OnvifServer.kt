@@ -567,10 +567,15 @@ class OnvifServer(
 
     private fun videoEncoderConfig(token: String, tag: String = "tt:VideoEncoderConfiguration"): String {
         val s = stream()
-        val fps = s.fps.coerceAtLeast(1)
+        val sub = token == "sub"
+        val fps = (if (sub) s.subFps else s.fps).coerceAtLeast(1)
+        val width = if (sub) s.subWidth else s.width
+        val height = if (sub) s.subHeight else s.height
+        val bitrate = if (sub) s.subBitrateKbps else s.bitrateKbps
+        val quality = if (sub) 5 else s.quality
         return "<$tag token=\"vec_$token\"><tt:Name>${if (token == "main") "MainStream" else "SubStream"}</tt:Name><tt:UseCount>1</tt:UseCount>" +
-            "<tt:Encoding>H264</tt:Encoding><tt:Resolution><tt:Width>${s.width}</tt:Width><tt:Height>${s.height}</tt:Height></tt:Resolution>" +
-            "<tt:Quality>5</tt:Quality><tt:RateControl><tt:FrameRateLimit>$fps</tt:FrameRateLimit><tt:EncodingInterval>1</tt:EncodingInterval><tt:BitrateLimit>${s.bitrateKbps}</tt:BitrateLimit></tt:RateControl>" +
+            "<tt:Encoding>H264</tt:Encoding><tt:Resolution><tt:Width>$width</tt:Width><tt:Height>$height</tt:Height></tt:Resolution>" +
+            "<tt:Quality>$quality</tt:Quality><tt:RateControl><tt:FrameRateLimit>$fps</tt:FrameRateLimit><tt:EncodingInterval>1</tt:EncodingInterval><tt:BitrateLimit>$bitrate</tt:BitrateLimit></tt:RateControl>" +
             "<tt:H264><tt:GovLength>${fps}</tt:GovLength><tt:H264Profile>Main</tt:H264Profile></tt:H264>" +
             "<tt:Multicast><tt:Address><tt:Type>IPv4</tt:Type><tt:IPv4Address>0.0.0.0</tt:IPv4Address></tt:Address><tt:Port>0</tt:Port><tt:TTL>1</tt:TTL><tt:AutoStart>false</tt:AutoStart></tt:Multicast>" +
             "<tt:SessionTimeout>PT60S</tt:SessionTimeout></$tag>"
@@ -709,10 +714,16 @@ class OnvifServer(
 
     private fun media2EncoderConfig(token: String, tag: String): String {
         val s = stream()
-        return "<$tag token=\"vec_$token\" GovLength=\"${s.fps.coerceAtLeast(1)}\" Profile=\"Main\"><tt:Name>${if (token == "main") "MainStream" else "SubStream"}</tt:Name><tt:UseCount>1</tt:UseCount>" +
-            "<tt:Encoding>H264</tt:Encoding><tt:Resolution><tt:Width>${s.width}</tt:Width><tt:Height>${s.height}</tt:Height></tt:Resolution>" +
-            "<tt:RateControl ConstantBitRate=\"false\"><tt:FrameRateLimit>${s.fps}</tt:FrameRateLimit><tt:BitrateLimit>${s.bitrateKbps}</tt:BitrateLimit></tt:RateControl>" +
-            "<tt:Quality>5</tt:Quality></$tag>"
+        val sub = token == "sub"
+        val fps = if (sub) s.subFps else s.fps
+        val bitrate = if (sub) s.subBitrateKbps else s.bitrateKbps
+        val width = if (sub) s.subWidth else s.width
+        val height = if (sub) s.subHeight else s.height
+        val quality = if (sub) 5 else s.quality
+        return "<$tag token=\"vec_$token\" GovLength=\"${fps.coerceAtLeast(1)}\" Profile=\"Main\"><tt:Name>${if (token == "main") "MainStream" else "SubStream"}</tt:Name><tt:UseCount>1</tt:UseCount>" +
+            "<tt:Encoding>H264</tt:Encoding><tt:Resolution><tt:Width>$width</tt:Width><tt:Height>$height</tt:Height></tt:Resolution>" +
+            "<tt:RateControl ConstantBitRate=\"false\"><tt:FrameRateLimit>$fps</tt:FrameRateLimit><tt:BitrateLimit>$bitrate</tt:BitrateLimit></tt:RateControl>" +
+            "<tt:Quality>$quality</tt:Quality></$tag>"
     }
 
     private fun media2(action: String, op: Element): String? {
