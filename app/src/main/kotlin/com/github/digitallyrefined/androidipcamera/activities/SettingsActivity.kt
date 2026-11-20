@@ -255,7 +255,7 @@ class SettingsActivity : AppCompatActivity() {
                 setRtspOptionsVisible(isChecked)
                 setOnvifOptionsVisible(isChecked)
                 summaryProvider = Preference.SummaryProvider<androidx.preference.CheckBoxPreference> {
-                    "Serve the camera at ${if (TlsHelper.isEnabled(requireContext())) "rtsps" else "rtsp"}://[ip_address]:[port]/live (H.264 video, AAC audio) and enable ONVIF discovery/control for VLC, Frigate, NVRs and Home Assistant, using the same username and password"
+                    "RTSP video + ONVIF device discovery on your LAN. ONVIF uses plain HTTP; RTSP and ONVIF authorization/TLS have separate switches."
                 }
 
                 setOnPreferenceChangeListener { _, newValue ->
@@ -342,23 +342,17 @@ class SettingsActivity : AppCompatActivity() {
                 }
             }
 
-            // ONVIF can speak HTTP independently of the web/RTSP TLS listeners.
-            // This is needed by go2rtc's onvif:// client, which starts with an HTTP POST.
-            findPreference<androidx.preference.CheckBoxPreference>("onvif_tls_enabled")?.apply {
-                setOnPreferenceChangeListener { _, enabled ->
-                    if (enabled == false && isRtspEnabled()) {
-                        Toast.makeText(requireContext(),
-                            "ONVIF HTTP is now available on the LAN; credentials are not encrypted",
-                            Toast.LENGTH_LONG).show()
+            // ONVIF HTTP is isolated from Web HTTPS/RTSPS. The old saved
+            // onvif_tls_enabled=true is deliberately ignored by the server.
+            for (key in listOf("onvif_auth_enabled", "rtsp_tls_enabled",
+                "lg_main0_background_hold")) {
+                findPreference<androidx.preference.CheckBoxPreference>(key)
+                    ?.setOnPreferenceChangeListener { _, _ ->
+                        android.os.Handler(android.os.Looper.getMainLooper()).post {
+                            restartStreamingServer()
+                        }
+                        true
                     }
-                    // Preference callbacks run before the new value is persisted.
-                    // Schedule restart for the next main-loop turn so ONVIF opens
-                    // with the NEW TLS transport, not the previous setting.
-                    android.os.Handler(android.os.Looper.getMainLooper()).post {
-                        restartStreamingServer()
-                    }
-                    true
-                }
             }
 
             // Add validation for certificate password
@@ -789,12 +783,13 @@ class SettingsActivity : AppCompatActivity() {
         }
 
         private fun setRtspOptionsVisible(visible: Boolean) {
-            listOf(RtspServer.PREF_PORT)
+            listOf(RtspServer.PREF_PORT, "rtsp_tls_enabled")
                 .forEach { findPreference<Preference>(it)?.isVisible = visible }
         }
 
         private fun setOnvifOptionsVisible(visible: Boolean) {
-            listOf(PREF_ONVIF_NAME, PREF_ONVIF_PORT, "onvif_tls_enabled")
+            listOf(PREF_ONVIF_NAME, PREF_ONVIF_PORT, "onvif_transport_info",
+                "onvif_auth_enabled", "lg_main0_background_hold")
                 .forEach { findPreference<Preference>(it)?.isVisible = visible }
         }
 
