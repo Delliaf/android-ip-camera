@@ -68,3 +68,26 @@ CI attempts:
 New main builder records source-sha.txt and apk-sha256.txt with the APK and targets only ARM64-V8A; it does NOT merge PR8 into main. Prior main retry run 44744576842 used older source SHA and should not be distributed as latest APK.
 
 Next developer: check CI run 44746118951, resolve remaining failures and confirm exact source SHA and artifacts; update THIS journal and PR8 with final verified result. Do not claim hardware validation by JVM.
+
+
+## 2026-11-20 — FINAL VERIFIED FRESH ARM64 APK (SUCCESS)
+
+Latest experimental branch code SHA: ac9c3b601e29cb44df51601a7f09c42f4bfc5a97.
+
+**GitHub Actions**: https://github.com/Delliaf/android-ip-camera/actions/runs/44746791322
+- Workflow "Android 8 Camera Fork - Build and Tests"; event push, source SHA above confirmed identical to latest branch HEAD.
+- Status completed, conclusion success.
+- Embedded browser JS validation and existing web/ONVIF/ISP tests: SUCCESS.
+- Kotlin/JVM :app:testDebugUnitTest and :app:assembleDebug: SUCCESS (Gradle BUILD SUCCESSFUL in 3m 11s).
+- Native APK architecture: VERIFIED lib/arm64-v8a/ ONLY; no other JNI ABIs.
+- Artifact name: android-ip-camera-android8-debug (ZIP containing installable debug APK). Artifact ID: 14633936443. ZIP size: 11,272,090 bytes.
+- Direct verified artifact download: https://github.com/Delliaf/android-ip-camera/actions/runs/44746791322/artifacts/14633936443
+- Version 0.18.0-delliaf.11, versionCode 191 from app/build.gradle.
+
+Additional failure fixed:
+- Earlier run 44746118951 failed unit-test compilation because the updated TlsServerTest.kt used assertFalse without importing it. The import was added in commit ac9c3b6. This test now verifies that ONVIF HTTPS does NOT rewrite separately configured RTSP as RTSPS.
+- The successful run above supersedes older failed attempts and all old .10 APKs.
+
+**NOT DEVICE-VERIFIED**: must install on physical LG-H872, test manual focus across lock/unlock, RTSP reconnections, ONVIF HTTP/go2rtc, authentication, Imaging/relay controls, main/substream bitrate/FPS and battery/CPU/SoC vendor health events. A green CI only establishes software tests, build and APK contents.
+
+Code remains in draft PR #8, not merged into main. Reusable default branch workflow .github/workflows/h872-experimental-apk.yml also supports future workflow_dispatch builds; experimental-branch push CI now works.
