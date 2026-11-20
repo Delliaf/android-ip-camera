@@ -29,3 +29,20 @@
 - Verify exact code behavior and daemon reports, test with go2rtc actual HTTP/WS-Discovery and RTSP URL/credentials.
 - Ensure ONVIF extensions don't claim formal ONVIF certification, nor publish unauthenticated control service to WAN by default.
 - Update separate domain workstream doc and PR with precise code changes and regression tests.
+
+
+## 2026-11-20 — implemented source, review, tests, CI pending
+
+- **Draft PR #8:** https://github.com/Delliaf/android-ip-camera/pull/8, base `fix/lg-g6-noise-edge-sharpness-20261120`. Исходники и тесты в `fix/lg-g6-focus-onvif-lifecycle-20261120`.
+- **Точный HEAD на момент записи:** `f5ffc37334c6b067d6f551271bf321e28170ad6a`. Версия `0.18.0-delliaf.11`, versionCode191, arm64-v8a only, Android 8 target.
+- Изменённые модули: `StreamingService.kt`, `Camera1Capture.kt`, `OnvifServer.kt`, `OnvifSoap.kt`, `AndroidRtspHost.kt`, `RtspServer.kt`, `MainActivity.kt`, `StreamingServerHelper.kt`, `SettingsActivity.kt`, `preferences.xml`, `index.html`, `CameraSessionTest.kt`, `OnvifControlIntegrationTest.kt`, JS tests, CI workflow, Gradle version.
+- Реализовано: LG Main0 pinned headless camera через `lg_main0_background_hold=true` при RTSP enabled, session reuse на screen lock и client reconnect; PARTIAL_WAKE_LOCK; Direct Camera2 PRIVATE fallback до Camera1; Camera1 one-shot AF lock вместо continuous-video, без ложного обещания точных D. На LG H872 cold-start ID0 используется реальный Camera2 ID.
+- ONVIF SOAP всегда plain HTTP (legacy `onvif_tls_enabled` игнорируется), ONVIF auth отдельно `onvif_auth_enabled` OFF по умолчанию; RTSP auth отдельно `rtsp_auth_enabled`, старая настройка `enable_auth` переносится безопасно, без неожиданного раскрытия ранее закрытого RTSP; RTSP TLS отдельно `rtsp_tls_enabled` OFF по умолчанию; anonymous ONVIF/RTSP соединения ограничены локальными IP. Web TLS не меняется.
+- ONVIF Device `GetRelayOutputs`, `SetRelayOutputState`, Device.IO `RelayOutputs` capability; Imaging `GetImagingSettings/Options/MoveOptions/Status`, `SetImagingSettings`, `Move`, Stop; Control callbacks whitelist и фактические prefs. Media1/Media2 encoder settings → реальные FPS/битрейт main и sub, отдельный `/live/sub`; неподдерживаемые H265/resolution/quality отказывают SOAP Fault 400.
+- `onvif_video_quality` 1–5 → 1/3/6/12/24 Mbps H264 (общий RTSP+ONVIF main encoder); FPS web/ONVIF теперь сохраняется и перезапускает H264, а не только MJPEG. `/info.json.settings.onvifVideoQuality` позволяет UI восстановить состояние.
+- Vendor `apph:DeviceHealth` ONVIF PullPoint содержит BatteryPercent, BatteryTemperatureC, SoCTemperatureC, CpuPercent. Это НЕ стандартный ONVIF-сенсор, поэтому клиенты вправе не отображать показатели.
+- Regression tests: `OnvifControlIntegrationTest` (focus/torch/media1+2/health/invalid config), `CameraSessionTest` (pinned H264 survives preview changes), JS `test-onvif-rtsp-ui.cjs` и `test-onvif-transport.cjs`.
+- **CI STATUS:** запрошенный Android8 workflow включён в `.github/workflows/android8-fork-ci.yml` для новой ветки; но GitHub Actions API по этой ветке пока возвращает **0 workflow runs/check-runs**, при этом GitHub branch/PR/commits существуют. Поэтому ни `testDebugUnitTest`, ни `assembleDebug`, ни artifact .11 **не подтверждены**. НЕ выдавать старый .10 APK в качестве .11. Проверить Actions доступность/настройки в GitHub UI; после успешного запуска записать run URL, SHA и artifact. Если CI потребует исправлений Kotlin/tests, выполнять только в этой ветке и дописать журнал.
+- **DEVICE TEST:** отсутствует для .11. После сборки проверить фокус (D) + блокировку 10–30 минут, RTSP client reconnect, TCP `http://<LAN-IP>:8000/onvif/device_service`, `/live` и `/live/sub`, SOAP Imaging/Relay/Media и vendor health events. Не открывать anonymous ONVIF/RTSP порты в Internet.
+- Устранение дрейфа фокуса, вызванного самой прошивкой или физической потерей HAL при screen lock, ещё не доказано; тест `CameraSession.serves` проверяет логику приложения, а не железо.
+- Подробный инженерный handoff: `main/docs/workstreams/onvif-20261120-h872-focus-transport-quality-telemetry.md`. Пользовательский ZIP остаётся приватным.
