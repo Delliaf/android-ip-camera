@@ -35,7 +35,26 @@ data class OnvifStreamInfo(
     val width: Int,
     val height: Int,
     val fps: Int,
-    val bitrateKbps: Int
+    val bitrateKbps: Int,
+    val quality: Int = 5,
+    val subWidth: Int = width,
+    val subHeight: Int = height,
+    val subFps: Int = fps,
+    val subBitrateKbps: Int = bitrateKbps,
+    val subRtspUrl: String = rtspUrl,
+)
+
+data class OnvifControlStatus(
+    val focusAvailable: Boolean = false,
+    val focusLocked: Boolean = false,
+    val focusDiopters: Float = 0f,
+    val maxFocusDiopters: Float = 10f,
+    val torchAvailable: Boolean = false,
+    val torchEnabled: Boolean = false,
+    val batteryPercent: Int? = null,
+    val batteryCelsius: Double? = null,
+    val socCelsius: Double? = null,
+    val cpuPercent: Int? = null,
 )
 
 /**
@@ -50,6 +69,9 @@ class OnvifServer(
     private val stream: () -> OnvifStreamInfo,
     private val credentials: () -> Pair<String, String>?,
     private val snapshot: (() -> ByteArray?)? = null,
+    /** Status and command adapters owned by the Android foreground service. */
+    private val cameraStatus: () -> OnvifControlStatus = { OnvifControlStatus() },
+    private val cameraControl: (String, String) -> Boolean = { _, _ -> false },
     private val onLog: (String) -> Unit = {},
     private val discoveryPort: Int = 3702,
     private val enableDiscovery: Boolean = true,
@@ -317,7 +339,7 @@ class OnvifServer(
             OnvifNs.TR2 -> media2(action, op)
             OnvifNs.TEV -> events(action, op, path, header)
             OnvifNs.WSNT -> notification(action, op, path, header)
-            OnvifNs.TIMG -> imaging(action)
+            OnvifNs.TIMG -> imaging(action, op)
             else -> null
         }
         if (result != null && result.startsWith("FAULT:")) {
@@ -538,9 +560,10 @@ class OnvifServer(
 
     private fun profileToken(op: Element): String? = OnvifXml.text(op, "ProfileToken")
 
-    private fun streamUri(): String {
-        val url = stream().rtspUrl
-        return if (secure) url.replaceFirst("rtsp://", "rtsps://") else url
+    private fun streamUri(token: String = "main"): String {
+        // ONVIF HTTP/HTTPS transport has NOTHING to do with RTSP/RTSPS.
+        val s = stream()
+        return if (token == "sub") s.subRtspUrl else s.rtspUrl
     }
 
     private fun media(action: String, op: Element): String? {
